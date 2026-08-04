@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>最新版で開く</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-store">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='14' width='52' height='36' rx='6' fill='none' stroke='%23333' stroke-width='5'/%3E%3Cpath d='M19 30h26M19 40h16' stroke='%23333' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  body{
+    margin:0; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; padding:24px;
+    font-family:"Avenir Next", Avenir, "Helvetica Neue",
+                "Hiragino Kaku Gothic ProN", "Hiragino Sans", sans-serif;
+    background:#fff; color:#222; text-align:center; line-height:1.7;
+  }
+  h1{font-size:19px; margin:0;}
+  p{margin:0; font-size:15px; color:#666;}
+  code{font-size:13px; color:#888;}
+  a.go{
+    display:inline-block; margin-top:6px; padding:14px 26px; border-radius:10px;
+    background:#0a58ca; color:#fff; text-decoration:none; font-size:16px;
+  }
+</style>
+</head>
+<body>
+
+<h1 id="title">最新版を読み込んでいます…</h1>
+<p id="msg">キャッシュと Service Worker を消しています</p>
+<a class="go" id="go" href="./index.html" hidden>開く</a>
+<p><code id="ver"></code></p>
+
+<script>
+/* このページは «一度も開いたことのない URL» として使うための入口。
+   ブラウザに残った古い index.html を捨てさせてから、
+   版番号付きの URL で本体を開き直す。 */
+(async () => {
+  const title = document.getElementById('title');
+  const msg   = document.getElementById('msg');
+  const go    = document.getElementById('go');
+  const ver   = document.getElementById('ver');
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (e) { /* 未対応のブラウザでは何もしない */ }
+
+  try {
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) { /* 同上 */ }
+
+  let v = 'r' + Date.now();
+  try {
+    const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) v = (await res.json()).version || v;
+  } catch (e) { /* 取れなければ時刻を版代わりに使う */ }
+
+  const url = './index.html?v=' + encodeURIComponent(v);
+  title.textContent = '最新版で開きます';
+  msg.textContent = '自動で切り替わらない場合は下のボタンを押してください';
+  ver.textContent = 'ver ' + v;
+  go.href = url;
+  go.hidden = false;
+  location.replace(url);
+})();
+</script>
+</body>
+</html>

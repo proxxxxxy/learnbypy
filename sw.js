@@ -6,7 +6,7 @@
    そのままだと「network-first のはずが古い index.html が返る」ことがある。
    (ホーム画面に追加した iOS の Web アプリで特に起こりやすい)
    そこでネットワーク取得は必ず cache:'no-store' で行う。 */
-const CACHE = 'flashcards-v4';
+const CACHE = 'flashcards-v5';
 const ASSETS = ['./', './index.html', './manifest.json', './lists/index.json'];
 
 self.addEventListener('install', ev => {
@@ -29,7 +29,8 @@ self.addEventListener('fetch', ev => {
   const req = ev.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
   /* 版の確認だけは絶対にキャッシュを挟まない */
-  if (new URL(req.url).pathname.endsWith('/version.json')) return;
+  const pathname = new URL(req.url).pathname;
+  if (pathname.endsWith('/version.json') || pathname.endsWith('/start.html')) return;
 
   ev.respondWith(
     fetch(new Request(req, { cache: 'no-store' }))

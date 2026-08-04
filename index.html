@@ -369,7 +369,7 @@
 'use strict';
 
 /* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
-const APP_VERSION = '2026-08-05a';
+const APP_VERSION = '2026-08-05b';
 
 /* ══════════════════════════════════════════════════════════
    版ずれの自己修復
@@ -513,7 +513,11 @@ function judge(input, answer) {
 }
 
 /* 表示用は「|」の前だけ (別解は採点にのみ使う) */
-const shownAnswer = a => String(a).split('|')[0].trim();
+/* 別解は行ごとに切る。答え全体を一度に split すると
+   「(1)○|o|マル\n(2)×|x|バツ」が「(1)○」だけになってしまう */
+const shownAnswer = a => String(a).split('\n')
+  .map(line => line.split('|')[0].replace(/\s+$/, ''))
+  .join('\n');
 
 /* 「(1)ワード\n(2)ビット」「(1)PNP, (2)アノード」どちらの書き方も拾う */
 function answerParts(a) {
