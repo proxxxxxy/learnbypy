@@ -67,11 +67,12 @@
   .lbl > .inner.block{text-align:left; white-space:pre;}
   .lbl > .inner.block.wrap{white-space:pre-wrap;}
 
-  /* ── 入力して答えるとき (穴埋め / 記述) の解答欄 ── */
+  /* ── 入力して答えるとき (穴埋め / 選択 / 記述) の解答欄 ── */
+  #response-panel{display:contents;}
   #answer-area{
     position:absolute; left:20px; right:20px;
     top:calc(var(--safe-t) + 41%);
-    display:none; flex-direction:column; gap:7px;
+    display:none; flex-direction:column; gap:10px;
     overflow-y:auto; -webkit-overflow-scrolling:touch;
     /* 下端はボタン行の手前まで。キーボードが出ているときはその上まで */
     max-height:min(
@@ -84,34 +85,73 @@
     top:calc(var(--safe-t) + 86px);
     height:calc(41% - 94px);
   }
+  /* 回答欄と操作ボタンを1つのパネルにして、入力欄のすぐ下に置く。
+     --kb は Visual Viewport が検出したソフトキーボードの高さ。 */
+  body.answering #response-panel{
+    position:absolute; z-index:4;
+    left:16px; right:16px;
+    top:calc(var(--safe-t) + 41%);
+    bottom:calc(var(--safe-b) + 42px + var(--kb, 0px));
+    display:flex; flex-direction:column; gap:12px;
+    min-height:0; overflow:hidden;
+  }
+  body.answering #answer-area{
+    position:static; flex:0 1 auto; min-height:0; max-height:calc(100% - 70px);
+    padding:2px; overflow-y:auto;
+  }
+  body.answering #answer-area.scroll-controls{flex:1 1 auto;}
+  body.answering #btnrow{
+    position:static; flex:0 0 auto; width:100%;
+  }
+  .ans-row{min-width:0;}
   .ans-row .line{display:flex; align-items:center; gap:8px;}
+  .ans-row.choice-row .line, .ans-row.self-row .line{align-items:flex-start;}
   .ans-row .n{
     flex:0 0 auto; min-width:2.4em; text-align:right;
-    font-size:16px; color:#555;
+    padding-top:11px; font-size:16px; color:#555;
   }
-  .ans-row input{
+  .ans-row input:not([type="hidden"]), .ans-row textarea{
     flex:1 1 auto; min-width:0; padding:8px 10px;
     border:1px solid #c8c8cc; border-radius:8px;
     font-family:var(--font-ui); font-size:17px; background:#fff; color:#000;
     -webkit-user-select:text; user-select:text;
   }
-  .ans-row input:focus{outline:none; border-color:#0a58ca;}
-  .ans-row .mark{flex:0 0 auto; width:1.3em; text-align:center; font-size:19px;}
-  .ans-row.ok  input{border-color:var(--green); background:#f3fbf4;}
+  .ans-row textarea{min-height:96px; line-height:1.5; resize:none;}
+  .ans-row input:focus, .ans-row textarea:focus{outline:none; border-color:#0a58ca;}
+  .ans-row .mark{flex:0 0 auto; width:1.3em; padding-top:10px; text-align:center; font-size:19px;}
+  .ans-row.ok  input:not([type="hidden"]), .ans-row.ok textarea{border-color:var(--green); background:#f3fbf4;}
   .ans-row.ok  .mark{color:var(--green);}
-  .ans-row.ng  input{border-color:var(--red);   background:#fdf4f4;}
+  .ans-row.ng  input:not([type="hidden"]), .ans-row.ng textarea{border-color:var(--red); background:#fdf4f4;}
   .ans-row.ng  .mark{color:var(--red);}
   .ans-row .correct{
     margin:3px 0 2px calc(2.4em + 8px);
     font-size:15px; color:var(--green); white-space:pre-wrap; word-break:break-word;
   }
+  .ans-row.self-row .correct, .ans-row.choice-row .correct{margin-left:calc(2.4em + 8px);}
+  .answer-hint{margin:5px 0 0 calc(2.4em + 8px); font-size:12px; color:#777;}
+  .choice-grid{
+    flex:1 1 auto; min-width:0;
+    display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;
+  }
+  .choice-grid.long{grid-template-columns:1fr;}
+  .choice-btn{
+    min-height:48px; padding:9px 12px;
+    border:2px solid #c8c8cc; border-radius:10px;
+    background:#fff; color:#222; text-align:left;
+    font-family:var(--font-ui); font-size:16px; line-height:1.35; cursor:pointer;
+  }
+  .choice-grid.binary .choice-btn{text-align:center; font-size:25px; font-weight:700;}
+  .choice-btn.selected{border-color:#0a58ca; background:#eaf2ff; color:#064ca8;}
+  .choice-btn.correct-choice{border-color:var(--green); background:#eaf7ec; color:#237a28;}
+  .choice-btn.wrong-choice{border-color:var(--red); background:#fceded; color:#b32622;}
+  .choice-btn:disabled{opacity:1; cursor:default;}
 
   #stat{
     position:absolute; left:20px; right:20px;
     bottom:calc(var(--safe-b) + 20px);
     text-align:center; font-size:14px; color:#666;
   }
-  body.kb-open #btnrow, body.kb-open #stat{display:none;}
+  body.kb-open #stat{display:none;}
 
   #btnrow{
     position:absolute; left:20px; right:20px;
@@ -133,8 +173,10 @@
   /* 自動採点の結果を「たぶんこっち」として指し示す */
   .bigbtn.suggest{box-shadow:0 0 0 3px #222;}
   #btn-check{display:none; background:#0a58ca; font-size:22px;}
-  #btnrow.input-mode #btn-check{display:block;}
-  #btnrow.input-mode .bigbtn:not(#btn-check){display:none;}
+  #btnrow.input-mode .bigbtn{display:none;}
+  #btnrow.input-mode #btn-check, #btnrow.input-mode #btn-back{display:block;}
+  #btnrow.input-mode #btn-back{flex:0 0 74px; font-size:28px;}
+  body.answering .bigbtn{height:58px;}
 
   .roundbtn{
     position:absolute; top:calc(var(--safe-t) + 14px);
@@ -252,12 +294,14 @@
 <div id="card-view">
   <div class="lbl" id="word"></div>
   <div class="lbl" id="mean"></div>
-  <div id="answer-area"></div>
-  <div id="btnrow">
-    <button class="bigbtn" id="btn-check">答え合わせ</button>
-    <button class="bigbtn" id="btn-correct">✔︎</button>
-    <button class="bigbtn" id="btn-wrong">✘</button>
-    <button class="bigbtn" id="btn-back">↩︎</button>
+  <div id="response-panel">
+    <div id="answer-area"></div>
+    <div id="btnrow">
+      <button class="bigbtn" id="btn-check">答え合わせ</button>
+      <button class="bigbtn" id="btn-correct">✔︎</button>
+      <button class="bigbtn" id="btn-wrong">✘</button>
+      <button class="bigbtn" id="btn-back" aria-label="前の問題に戻る">↩︎</button>
+    </div>
   </div>
   <button class="roundbtn" id="btn-exit">✕</button>
   <button class="roundbtn" id="btn-menu">☰</button>
@@ -369,7 +413,7 @@
 'use strict';
 
 /* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
-const APP_VERSION = '2026-08-05d';
+const APP_VERSION = '2026-08-05e';
 
 /* ══════════════════════════════════════════════════════════
    版ずれの自己修復
@@ -507,10 +551,31 @@ function norm(s) {
     .replace(/[ぁ-ゖ]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60));
 }
 
-function judge(input, answer) {
+function editDistance(a, b) {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const old = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = old;
+    }
+  }
+  return prev[b.length];
+}
+
+function judge(input, answer, relaxed = false) {
   const v = norm(input);
   if (!v) return false;
-  return String(answer).split('|').map(norm).filter(Boolean).includes(v);
+  const alternatives = String(answer).split('|').map(norm).filter(Boolean);
+  if (alternatives.includes(v)) return true;
+  if (!relaxed) return false;
+  return alternatives.some(a => {
+    const longest = Math.max(v.length, a.length);
+    if (Math.min(v.length, a.length) < 4) return false;
+    return editDistance(v, a) <= Math.max(1, Math.floor(longest * .12));
+  });
 }
 
 /* 表示用は「|」の前だけ (別解は採点にのみ使う) */
@@ -532,6 +597,48 @@ function answerParts(a) {
     text: s.slice(h.end, i + 1 < hits.length ? hits[i + 1].start : s.length)
            .replace(/^[\s、,]+/, '').replace(/[\s、,\n]+$/, ''),
   }));
+}
+
+/* 「1. 選択肢」の連続した行を持つ記述問題は、番号入力ではなく選択ボタンにする。 */
+function multipleChoice(card) {
+  if ((card[3] || '') !== 'write') return null;
+  const lines = String(card[1]).split('\n');
+  const options = [];
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*(\d+)[.．]\s*(.+)$/);
+    if (m) {
+      if (start < 0) start = i;
+      options.push({ value: m[1], label: `${m[1]}. ${m[2].trim()}` });
+    } else if (start >= 0 && lines[i].trim()) {
+      break;
+    }
+  }
+  if (options.length < 2) return null;
+  return { prompt: lines.slice(0, start).join('\n').trim(), options };
+}
+
+const trueFalseValue = answer => {
+  const values = String(answer).split('|').map(norm);
+  if (values.some(v => v === '○' || v === 'o' || v === 'マル')) return '○';
+  if (values.some(v => v === '×' || v === 'x' || v === 'バツ')) return '×';
+  return null;
+};
+
+/* 問題文に候補が明記されている短い穴埋めもタップ回答にする。 */
+function presetChoices(card, answer) {
+  if (trueFalseValue(answer)) return [
+    { value: '○', label: '○' },
+    { value: '×', label: '×' },
+  ];
+  const q = String(card[1]);
+  const first = norm(String(answer).split('|')[0]);
+  const sets = [
+    { pattern: /上[・／/]下[・／/]左[・／/]右/, values: ['上', '下', '左', '右'] },
+    { pattern: /F[、,／/]Z[、,／/]N/i, values: ['F', 'Z', 'N'] },
+  ];
+  const set = sets.find(s => s.pattern.test(q) && s.values.map(norm).includes(first));
+  return set ? set.values.map(v => ({ value: v, label: v })) : null;
 }
 
 const seedCards = () => normalizeCards(JSON.parse(document.getElementById('seed-deck').textContent));
@@ -828,7 +935,9 @@ function presentCard() {
   /* ラベルの高さが変わるので、フォントを測る前に切り替えておく */
   document.body.classList.toggle('answering', state.mode !== 'flip');
 
-  const front = state.jpFirst ? shownAnswer(a) : `${no}. ${q}`;
+  const choices = state.mode === 'write' ? multipleChoice(card) : null;
+  const question = choices ? choices.prompt : q;
+  const front = state.jpFirst ? shownAnswer(a) : `${no}. ${question}`;
   renderFace(elWord, front, false);
   fitFont(elWord, 40, 14);
 
@@ -846,7 +955,9 @@ function presentCard() {
     setBtnMode(state.checked ? 'checked' : 'input');
   }
 
-  const MODE_JA = { flip: 'めくる', fill: '穴埋め', write: '記述', self: '自己' };
+  const parts = state.mode === 'fill' ? answerParts(a) : [];
+  const choiceUi = choices || parts.some(p => presetChoices(card, p.text));
+  const MODE_JA = { flip: 'めくる', fill: choiceUi ? '選択＋穴埋め' : '穴埋め', write: choices ? '選択' : '記述', self: '自己採点' };
   elStat.textContent =
     `${state.index + 1}/${state.cards.length}   正解 ${state.correct}/${state.attempts}`
     + `   [${card[3] || '形式なし'}→${MODE_JA[state.mode]}${state.forceFlip ? '*' : ''}]`;
@@ -866,14 +977,18 @@ function setBtnMode(m) {
 function renderInputs(card) {
   /* 答えが (1)(2)… に分かれていれば、その数だけ入力欄を出す。
      記述式(write)は答えが 1 つなので常に 1 欄 */
+  const multiple = state.mode === 'write' ? multipleChoice(card) : null;
   let parts = state.mode === 'write' ? [] : answerParts(card[2]);
   const numbered = parts.length > 0;
-  if (!numbered) parts = [{ n: '答え', text: card[2] }];
+  if (multiple) parts = [{ n: '選択', text: card[2], choices: multiple.options }];
+  else if (!numbered) parts = [{ n: '答え', text: card[2] }];
 
   ansArea.innerHTML = '';
+  ansArea.classList.toggle('scroll-controls', !!multiple || parts.length > 4);
   parts.forEach((p, i) => {
     const row = document.createElement('div');
-    row.className = 'ans-row';
+    const choices = p.choices || presetChoices(card, p.text);
+    row.className = 'ans-row' + (choices ? ' choice-row' : '') + (state.mode === 'self' ? ' self-row' : '');
 
     const line = document.createElement('div');
     line.className = 'line';
@@ -882,25 +997,63 @@ function renderInputs(card) {
     label.className = 'n';
     label.textContent = numbered ? `(${p.n})` : p.n;
 
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.autocomplete = 'off';
-    input.autocapitalize = 'off';
-    input.spellcheck = false;
-    input.enterKeyHint = i + 1 < parts.length ? 'next' : 'done';
+    const input = document.createElement(state.mode === 'self' ? 'textarea' : 'input');
     input.dataset.answer = p.text;
-    input.addEventListener('keydown', ev => {
-      if (ev.key !== 'Enter') return;
-      ev.preventDefault();
-      const next = ansArea.querySelectorAll('input')[i + 1];
-      if (next) next.focus(); else checkAnswers();
-    });
+
+    if (choices) {
+      input.type = 'hidden';
+    } else if (state.mode === 'self') {
+      input.rows = 3;
+      input.placeholder = '覚えている要点をメモ（空欄でも答えを確認できます）';
+      input.autocapitalize = 'sentences';
+      input.spellcheck = true;
+    } else {
+      input.type = 'text';
+      input.autocomplete = 'off';
+      input.autocapitalize = 'off';
+      input.spellcheck = false;
+      input.enterKeyHint = i + 1 < parts.length ? 'next' : 'done';
+      input.addEventListener('keydown', ev => {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        const fields = ansArea.querySelectorAll('input[type="text"], textarea');
+        const current = [...fields].indexOf(input);
+        const next = fields[current + 1];
+        if (next) next.focus(); else checkAnswers();
+      });
+    }
 
     const mark = document.createElement('span');
     mark.className = 'mark';
 
-    line.append(label, input, mark);
+    line.append(label, input);
+    if (choices) {
+      const grid = document.createElement('div');
+      const binary = choices.length === 2 && choices.every(c => c.value === '○' || c.value === '×');
+      grid.className = 'choice-grid' + (binary ? ' binary' : '') + (choices.some(c => c.label.length > 12) ? ' long' : '');
+      choices.forEach(choice => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'choice-btn';
+        button.dataset.value = choice.value;
+        button.textContent = choice.label;
+        button.addEventListener('click', () => {
+          if (state.checked) return;
+          input.value = choice.value;
+          grid.querySelectorAll('.choice-btn').forEach(b => b.classList.toggle('selected', b === button));
+        });
+        grid.appendChild(button);
+      });
+      line.appendChild(grid);
+    }
+    line.appendChild(mark);
     row.appendChild(line);
+    if (state.mode === 'self') {
+      const hint = document.createElement('div');
+      hint.className = 'answer-hint';
+      hint.textContent = '自由記述は完全一致で採点しません。模範解答を見て自分で○×を決めます。';
+      row.appendChild(hint);
+    }
     ansArea.appendChild(row);
   });
 
@@ -920,7 +1073,7 @@ function checkAnswers() {
 }
 
 function showResults() {
-  const inputs = [...ansArea.querySelectorAll('input')];
+  const inputs = [...ansArea.querySelectorAll('input[data-answer], textarea[data-answer]')];
 
   if (state.mode === 'self') {
     inputs.forEach(input => {
@@ -929,7 +1082,7 @@ function showResults() {
       if (row.querySelector('.correct')) return;
       const c = document.createElement('div');
       c.className = 'correct';
-      c.textContent = shownAnswer(input.dataset.answer);
+      c.textContent = '模範解答\n' + shownAnswer(input.dataset.answer);
       row.appendChild(c);
     });
     state.allOk = false;
@@ -938,12 +1091,17 @@ function showResults() {
 
   let allOk = true;
   inputs.forEach(input => {
-    const ok = judge(input.value, input.dataset.answer);
+    const ok = judge(input.value, input.dataset.answer, state.mode === 'write');
     if (!ok) allOk = false;
     const row = input.closest('.ans-row');
     row.classList.add(ok ? 'ok' : 'ng');
     row.querySelector('.mark').textContent = ok ? '○' : '×';
     input.readOnly = true;
+    row.querySelectorAll('.choice-btn').forEach(button => {
+      button.disabled = true;
+      if (judge(button.dataset.value, input.dataset.answer)) button.classList.add('correct-choice');
+      else if (button.classList.contains('selected')) button.classList.add('wrong-choice');
+    });
     if (!ok && !row.querySelector('.correct')) {
       const c = document.createElement('div');
       c.className = 'correct';
