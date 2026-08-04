@@ -1,8 +1,8 @@
 /* オフラインで動かすための最小 Service Worker。
    通信できるときは常に新しいものを取りに行き (network-first)、
    圏外なら直前にキャッシュした版を返す。 */
-const CACHE = 'flashcards-v1';
-const ASSETS = ['./', './index.html', './manifest.json'];
+const CACHE = 'flashcards-v2';
+const ASSETS = ['./', './index.html', './manifest.json', './lists/index.json'];
 
 self.addEventListener('install', ev => {
   ev.waitUntil(

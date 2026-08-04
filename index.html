@@ -316,8 +316,10 @@
 /* ══════════════════════════════════════════════════════════
    ストレージ (localStorage が使えない環境ではメモリに退避)
    ══════════════════════════════════════════════════════════ */
-const DECKS_KEY = 'flashcards.decks.v2';
-const LAST_KEY  = 'flashcards.lastDeck';
+const LAST_KEY   = 'flashcards.lastFile';
+const LOCAL_KEY  = 'flashcards.localFiles';
+const editKey    = f => 'flashcards.edit.'  + f;   // ファイルを編集した内容
+const cacheKey   = f => 'flashcards.cache.' + f;   // 取得済みファイル (圏外用)
 
 const store = (() => {
   let ok = true;
@@ -330,16 +332,22 @@ const store = (() => {
     persistent: ok,
     get(k)    { try { return ok ? localStorage.getItem(k) : (mem[k] ?? null); } catch (e) { return mem[k] ?? null; } },
     set(k, v) { try { ok ? localStorage.setItem(k, v) : (mem[k] = v); } catch (e) { mem[k] = v; } },
+    del(k)    { try { ok ? localStorage.removeItem(k) : delete mem[k]; } catch (e) { delete mem[k]; } },
   };
 })();
 
 /* ══════════════════════════════════════════════════════════
-   デッキ (= list*.json 1 個ぶん)
+   問題リスト = lists/ 以下の JSON ファイル
+     lists/index.json … 選択肢になるファイルの一覧
+     local:〜         … 端末の中だけにあるリスト (読み込み / 新規作成)
    ══════════════════════════════════════════════════════════ */
-let decks = [];        // [{id, name, cards:[[no, q, a], ...]}]
-let deckId = null;     // 現在のデッキ id
+let entries    = [];    // [{file, name, local}]
+let activeFile = null;  // 'semiconductor.json' など
+let activeName = '';
+let cards      = [];    // 現在のリストの中身
+let isEdited   = false; // ファイルから書き換えられているか
 
-const uid = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const isLocal = f => String(f).startsWith('local:');
 
 function normalizeCards(raw) {
   if (!Array.isArray(raw)) throw new Error('配列ではありません');
@@ -349,30 +357,93 @@ function normalizeCards(raw) {
   });
 }
 
-function loadDecks() {
-  const raw = store.get(DECKS_KEY);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) {
-        decks = parsed.map(d => ({ id: d.id || uid(), name: d.name || '無題', cards: normalizeCards(d.cards) }));
-        return;
+const seedCards = () => normalizeCards(JSON.parse(document.getElementById('seed-deck').textContent));
+
+/* index.json が読めないとき (file:// で開いた等) の最低限の一覧 */
+const FALLBACK_ENTRIES = [{ file: 'semiconductor.json', name: '半導体' }];
+
+function localEntries() {
+  try {
+    const v = JSON.parse(store.get(LOCAL_KEY) || '[]');
+    return Array.isArray(v) ? v.map(e => ({ file: e.file, name: e.name, local: true })) : [];
+  } catch (e) { return []; }
+}
+
+function saveLocalEntries(list) {
+  store.set(LOCAL_KEY, JSON.stringify(list.map(e => ({ file: e.file, name: e.name }))));
+}
+
+/* lists/index.json を読む。取れなければキャッシュ→組み込みの順に落とす */
+async function loadEntries() {
+  let fromNet = null;
+  try {
+    const res = await fetch('lists/index.json', { cache: 'no-cache' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (Array.isArray(raw) && raw.length) {
+        fromNet = raw.map(e => (typeof e === 'string'
+          ? { file: e, name: e.replace(/\.json$/i, '') }
+          : { file: e.file, name: e.name || String(e.file).replace(/\.json$/i, '') }));
+        store.set(cacheKey('index.json'), JSON.stringify(fromNet));
       }
-    } catch (e) { /* 壊れていたら初期データへ */ }
+    }
+  } catch (e) { /* 圏外・file:// */ }
+
+  let base = fromNet;
+  if (!base) {
+    try { base = JSON.parse(store.get(cacheKey('index.json')) || 'null'); } catch (e) { base = null; }
   }
-  decks = [{
-    id: uid(),
-    name: '半導体',
-    cards: normalizeCards(JSON.parse(document.getElementById('seed-deck').textContent)),
-  }];
-  saveDecks();
+  entries = (base && base.length ? base : FALLBACK_ENTRIES).concat(localEntries());
 }
 
+/* 1 ファイル読み込み。編集済みならそれを優先し、なければ実ファイル→キャッシュ */
+async function loadCards(entry) {
+  const edit = store.get(editKey(entry.file));
+  if (edit) {
+    try {
+      cards = normalizeCards(JSON.parse(edit));
+      isEdited = !entry.local;
+      return;
+    } catch (e) { store.del(editKey(entry.file)); }
+  }
+  isEdited = false;
+
+  if (entry.local) { cards = []; return; }
+
+  try {
+    const res = await fetch('lists/' + entry.file, { cache: 'no-cache' });
+    if (res.ok) {
+      const text = await res.text();
+      cards = normalizeCards(JSON.parse(text));
+      store.set(cacheKey(entry.file), text);
+      return;
+    }
+  } catch (e) { /* 圏外・file:// */ }
+
+  const cached = store.get(cacheKey(entry.file));
+  if (cached) { cards = normalizeCards(JSON.parse(cached)); return; }
+
+  /* 組み込みの初期データ (最初の1ファイルぶんだけ持っている) */
+  cards = entry.file === FALLBACK_ENTRIES[0].file ? seedCards() : [];
+}
+
+/* 圏外でも全リストを開けるよう、裏で残りのファイルも取っておく */
+function warmCache() {
+  entries.filter(e => !e.local && e.file !== activeFile).forEach(e => {
+    fetch('lists/' + e.file).then(r => r.ok && r.text())
+      .then(t => { if (t) { JSON.parse(t); store.set(cacheKey(e.file), t); } })
+      .catch(() => {});
+  });
+}
+
+/* エディタ側から見た「今のリスト」 */
+const currentDeck = () => ({ name: activeName, cards });
+
+/* エディタでの変更は端末内に保存する (元の JSON ファイルは書き換わらない) */
 function saveDecks() {
-  store.set(DECKS_KEY, JSON.stringify(decks));
+  store.set(editKey(activeFile), JSON.stringify(cards));
+  isEdited = !isLocal(activeFile);
 }
-
-const currentDeck = () => decks.find(d => d.id === deckId) || decks[0];
 
 /* ══════════════════════════════════════════════════════════
    ダイアログ (console.alert 相当) — 選んだ番号を 1 始まりで返す
@@ -610,103 +681,113 @@ async function finishDialog() {
    メニュー
    ══════════════════════════════════════════════════════════ */
 async function menuDialog() {
-  const ch = await alertDialog('メニュー', currentDeck().name,
+  const ch = await alertDialog('メニュー', menuSubtitle(),
     '順番で最初から',
     'シャッフルで最初から',
     '表示方向を切替',
     'リストを選ぶ',
     '問題を編集',
-    'リストの管理',
+    'ファイルの操作',
     'キャンセル');
 
   if (ch === 1) resetWith(state.allCards, false);
   else if (ch === 2) resetWith(state.allCards, true);
   else if (ch === 3) { state.jpFirst = !state.jpFirst; presentCard(); }
-  else if (ch === 4) await pickDeckDialog();
+  else if (ch === 4) await pickFileDialog();
   else if (ch === 5) openEditor();
-  else if (ch === 6) await deckAdminDialog();
+  else if (ch === 6) await fileAdminDialog();
 }
 
-async function pickDeckDialog() {
-  if (decks.length === 1) {
-    await alertDialog('リスト選択', 'リストは 1 個だけです', 'OK');
-    return menuDialog();
+const menuSubtitle = () =>
+  `${activeName} (${cards.length}問)` + (isEdited ? '  ※編集あり' : '');
+
+/* ── ファイル選択 (Pythonista 版の list*.json 選択に相当) ── */
+async function pickFileDialog(startup) {
+  let picked = entries[0];
+  if (entries.length > 1) {
+    const opts = entries.map(e => e.name + (e.local ? ' (端末)' : ''));
+    if (!startup) opts.push('キャンセル');
+    const ch = await alertDialog('問題リストを選ぶ', '', ...opts);
+    if (ch > entries.length) return;
+    picked = entries[ch - 1];
   }
-  const opts = decks.map(d => `${d.name} (${d.cards.length})`);
-  opts.push('キャンセル');
-  const ch = await alertDialog('リスト選択', '', ...opts);
-  if (ch > decks.length) return;
-  selectDeck(decks[ch - 1].id);
-  if (!state.allCards.length) {
+  await openEntry(picked);
+}
+
+/* リストを読み込んで、順序を聞いて開始 */
+async function openEntry(entry) {
+  activeFile = entry.file;
+  activeName = entry.name;
+  store.set(LAST_KEY, entry.file);
+  await loadCards(entry);
+  state.allCards = cards;
+  state.jpFirst = false;
+
+  if (!cards.length) {
     await alertDialog('問題がありません', 'このリストは空です。問題を追加してください。', 'OK');
     openEditor();
     return;
   }
   const ord = await alertDialog('カード順序', 'どの順序で始めますか?', '順番どおり', 'ランダム');
-  resetWith(state.allCards, ord === 2);
+  resetWith(cards, ord === 2);
 }
 
-function selectDeck(id) {
-  deckId = id;
-  store.set(LAST_KEY, id);
-  state.allCards = currentDeck().cards;
-  state.cards = state.allCards.slice();
-  state.index = state.correct = state.attempts = 0;
-  state.history = [];
-  state.wrongCards = [];
-  state.showMean = false;
-}
+/* ── ファイルの操作: 書き出し / 読み込み / 新規 / 編集の取り消し ── */
+async function fileAdminDialog() {
+  const local = isLocal(activeFile);
+  const acts = [];
+  acts.push(['export', 'JSON を書き出す']);
+  acts.push(['import', '端末の JSON を読み込む']);
+  acts.push(['new',    '新しいリストを作る (端末内)']);
+  if (isEdited) acts.push(['revert', { label: '編集を捨ててファイルに戻す', style: 'danger' }]);
+  if (local)    acts.push(['delete', { label: 'このリストを削除', style: 'danger' }]);
+  acts.push(['cancel', 'キャンセル']);
 
-/* ── リストの管理: 新規 / 名前変更 / 複製 / 削除 / 読込 / 書出 ── */
-async function deckAdminDialog() {
-  const ch = await alertDialog('リストの管理', currentDeck().name,
-    '新しいリストを作る',
-    'このリストの名前を変える',
-    'このリストを複製',
-    'JSON を読み込む',
-    'JSON を書き出す',
-    { label: 'このリストを削除', style: 'danger' },
-    'キャンセル');
+  const ch = await alertDialog('ファイルの操作', menuSubtitle(), ...acts.map(a => a[1]));
+  const act = acts[ch - 1][0];
 
-  if (ch === 1) {
-    const r = await openForm('新しいリスト', [{ key: 'name', label: 'リスト名', value: '' }]);
-    if (!r) return deckAdminDialog();
-    const name = (r.name || '').trim() || '無題';
-    const d = { id: uid(), name, cards: [] };
-    decks.push(d);
-    saveDecks();
-    selectDeck(d.id);
-    openEditor();
-  } else if (ch === 2) {
-    const d = currentDeck();
-    const r = await openForm('リスト名の変更', [{ key: 'name', label: 'リスト名', value: d.name }]);
-    if (!r) return;
-    d.name = (r.name || '').trim() || d.name;
-    saveDecks();
-  } else if (ch === 3) {
-    const d = currentDeck();
-    const copy = { id: uid(), name: d.name + ' のコピー', cards: d.cards.map(c => c.slice()) };
-    decks.push(copy);
-    saveDecks();
-    await alertDialog('複製しました', copy.name, 'OK');
-  } else if (ch === 4) {
+  if (act === 'export') {
+    await exportJson();
+  } else if (act === 'import') {
     importJson();
-  } else if (ch === 5) {
-    exportJson();
-  } else if (ch === 6) {
-    if (decks.length === 1) {
-      await alertDialog('削除できません', '最後の 1 個は削除できません', 'OK');
-      return;
-    }
-    const d = currentDeck();
-    const yes = await alertDialog('削除しますか?', `${d.name} (${d.cards.length}問)`,
+  } else if (act === 'new') {
+    const r = await openForm('新しいリスト', [{ key: 'name', label: 'リスト名', value: '' }]);
+    if (!r) return;
+    const name = (r.name || '').trim() || '無題';
+    addLocalEntry(name, []);
+  } else if (act === 'revert') {
+    const yes = await alertDialog('編集を捨てますか?', `${activeName} を lists/${activeFile} の内容に戻します`,
+                                  { label: '戻す', style: 'danger' }, 'やめる');
+    if (yes !== 1) return;
+    store.del(editKey(activeFile));
+    await openEntry({ file: activeFile, name: activeName });
+  } else if (act === 'delete') {
+    const yes = await alertDialog('削除しますか?', `${activeName} (${cards.length}問)`,
                                   { label: '削除する', style: 'danger' }, 'やめる');
     if (yes !== 1) return;
-    decks = decks.filter(x => x.id !== d.id);
-    saveDecks();
-    selectDeck(decks[0].id);
-    resetWith(state.allCards, false);
+    store.del(editKey(activeFile));
+    saveLocalEntries(localEntries().filter(e => e.file !== activeFile));
+    entries = entries.filter(e => e.file !== activeFile);
+    await openEntry(entries[0]);
   }
+}
+
+/* 端末内リストを 1 個増やして、そのまま開く */
+async function addLocalEntry(name, list) {
+  const file = 'local:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const entry = { file, name, local: true };
+  saveLocalEntries(localEntries().concat([entry]));
+  entries.push(entry);
+  store.set(editKey(file), JSON.stringify(list));
+  activeFile = file;
+  activeName = name;
+  store.set(LAST_KEY, file);
+  cards = list;
+  isEdited = false;
+  state.allCards = cards;
+  if (!cards.length) { openEditor(); return; }
+  const ord = await alertDialog('カード順序', 'どの順序で始めますか?', '順番どおり', 'ランダム');
+  resetWith(cards, ord === 2);
 }
 
 /* ── JSON 入出力 (Pythonista 版の list*.json と互換) ── */
@@ -720,16 +801,16 @@ function importJson() {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const cards = normalizeCards(JSON.parse(String(reader.result)));
+        const list = normalizeCards(JSON.parse(String(reader.result)));
         const name = file.name.replace(/\.json$/i, '');
-        const d = { id: uid(), name, cards };
-        decks.push(d);
-        saveDecks();
-        const ch = await alertDialog('読み込みました', `${name} (${cards.length}問)`,
+        const ch = await alertDialog('読み込みました', `${name} (${list.length}問)`,
                                      'このリストを始める', 'あとで');
-        if (ch === 1) {
-          selectDeck(d.id);
-          resetWith(state.allCards, false);
+        if (ch === 1) await addLocalEntry(name, list);
+        else {
+          const f = 'local:' + Date.now().toString(36);
+          saveLocalEntries(localEntries().concat([{ file: f, name }]));
+          entries.push({ file: f, name, local: true });
+          store.set(editKey(f), JSON.stringify(list));
         }
       } catch (e) {
         await alertDialog('読み込めません', String(e.message || e), 'OK');
@@ -740,18 +821,17 @@ function importJson() {
   input.click();
 }
 
-/* ブラウザによっては日本語のファイル名が捨てられて拡張子まで失われるので、
-   Pythonista 版と同じ list*.json 形式の ASCII 名にそろえる */
-function exportFileName(deck) {
-  const idx = decks.indexOf(deck) + 1;
-  const ascii = deck.name.replace(/[^\w.\- ]+/g, '').trim().replace(/\s+/g, '_');
-  return ascii ? `list${idx}_${ascii}.json` : `list${idx}.json`;
+/* ブラウザによっては日本語のファイル名が捨てられて拡張子まで失われるので
+   ASCII のファイル名にそろえる。lists/ 由来ならその名前をそのまま使う */
+function exportFileName() {
+  if (!isLocal(activeFile)) return activeFile;
+  const ascii = activeName.replace(/[^\w.\- ]+/g, '').trim().replace(/\s+/g, '_');
+  return (ascii || 'list') + '.json';
 }
 
 async function exportJson() {
-  const d = currentDeck();
-  const name = exportFileName(d);
-  const blob = new Blob([JSON.stringify(d.cards, null, 2)], { type: 'application/json' });
+  const name = exportFileName();
+  const blob = new Blob([JSON.stringify(cards, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -760,7 +840,7 @@ async function exportJson() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  await alertDialog('書き出しました', `${name}\n(${d.cards.length}問)`, 'OK');
+  await alertDialog('書き出しました', `${name}\n(${cards.length}問)`, 'OK');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -941,28 +1021,13 @@ window.addEventListener('resize', () => {
    起動
    ══════════════════════════════════════════════════════════ */
 async function startDialog() {
-  /* list*.json が複数あるときの選択に相当 */
-  if (decks.length > 1) {
-    const opts = decks.map(d => `${d.name} (${d.cards.length})`);
-    const ch = await alertDialog('リスト選択', '', ...opts);
-    selectDeck(decks[ch - 1].id);
-  } else {
-    selectDeck(decks[0].id);
-  }
-
-  if (!currentDeck().cards.length) {
-    await alertDialog('問題がありません', 'このリストは空です。問題を追加してください。', 'OK');
-    openEditor();
-    return;
-  }
-
-  const ch = await alertDialog('カード順序', 'どの順序で始めますか?', '順番どおり', 'ランダム');
-  resetWith(state.allCards, ch === 2);
+  /* Pythonista 版の load_word_list() と同じ流れ:
+     lists/ の JSON を一覧 → 1 個なら即決、複数なら選ばせる → 順序を聞く */
+  await loadEntries();
+  await pickFileDialog(true);
+  warmCache();
 }
 
-loadDecks();
-const last = store.get(LAST_KEY);
-if (last && decks.some(d => d.id === last)) deckId = last;
 startDialog();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
