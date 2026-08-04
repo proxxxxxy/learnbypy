@@ -17,11 +17,16 @@ Pythonista 3 用の暗記カードアプリ (`pythonista/test.py`) を、**ブ�
 
 ### GitHub Pages で公開する (おすすめ)
 
-1. このブランチを `main` にマージする
-2. リポジトリの **Settings → Pages** を開く
-3. **Source** を `Deploy from a branch`、**Branch** を `main` / `/ (root)` にして Save
+1. リポジトリの **Settings → Pages** を開く
+2. **Source** を `Deploy from a branch` にする
+3. **Branch** で `claude/pythonista-app-port-iiou2m` (このリポジトリのデフォルトブランチ)
+   を選び、フォルダは `/ (root)` にして Save
 4. 1〜2 分後に `https://proxxxxxy.github.io/learnbypy/` が使えるようになる
 5. iPhone の Safari でそのURLを開き、共有ボタン → **ホーム画面に追加**
+
+> 無料プランの場合、GitHub Pages は **public リポジトリでしか公開できません**。
+> private のままだと Pages の設定画面で有料プランへの案内が出ます。
+> public にしたくない場合は下の「ファイルを直接開く」を使ってください。
 
 ホーム画面から起動するとアドレスバーが消えて全画面になり、
 一度開いたあとは**機内モードでも動きます**。
