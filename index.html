@@ -369,7 +369,65 @@
 'use strict';
 
 /* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
-const APP_VERSION = '2026-08-04b';
+const APP_VERSION = '2026-08-05a';
+
+/* ══════════════════════════════════════════════════════════
+   版ずれの自己修復
+
+   ブラウザやホーム画面アプリが古い index.html を握ったままだと、
+   問題ファイルだけ新しくなって挙動が噛み合わなくなる。
+   version.json (キャッシュ経由なしで取得) と APP_VERSION を突き合わせ、
+   食い違っていたらキャッシュと Service Worker を捨てて読み直す。
+   ══════════════════════════════════════════════════════════ */
+async function fetchLatestVersion() {
+  try {
+    const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return null;
+    const v = (await res.json()).version;
+    return typeof v === 'string' ? v : null;
+  } catch (e) { return null; }
+}
+
+async function purgeAndReload(v) {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (e) { /* 消せなくてもクエリ付きで読み直せば新しいものが来る */ }
+  location.replace(location.pathname + '?v=' + encodeURIComponent(v));
+}
+
+/* silent=true なら «古いときだけ» 黙って直す (起動時用) */
+async function checkForUpdate(silent) {
+  const latest = await fetchLatestVersion();
+  if (!latest) {
+    if (!silent) await alertDialog('確認できません', '通信できませんでした', 'OK');
+    return;
+  }
+  if (latest === APP_VERSION) {
+    if (!silent) await alertDialog('最新です', 'ver ' + APP_VERSION, 'OK');
+    return;
+  }
+  /* 読み直しても直らない場合に往復し続けないよう 1 回だけにする */
+  let tried = null;
+  try { tried = sessionStorage.getItem('flashcards.reloadFor'); } catch (e) {}
+  if (tried === latest) {
+    if (!silent) {
+      await alertDialog('更新できません',
+        `新しい版 (${latest}) があるはずですが読み込めません。\n` +
+        'Safari の履歴とWebサイトデータを消去してください。', 'OK');
+    }
+    return;
+  }
+  try { sessionStorage.setItem('flashcards.reloadFor', latest); } catch (e) {}
+  if (!silent) await alertDialog('更新します', `ver ${APP_VERSION} → ${latest}`, 'OK');
+  await purgeAndReload(latest);
+}
 
 /* ══════════════════════════════════════════════════════════
    ストレージ (localStorage が使えない環境ではメモリに退避)
@@ -996,6 +1054,7 @@ async function fileAdminDialog() {
   acts.push(['export', 'JSON を書き出す']);
   acts.push(['import', '端末の JSON を読み込む']);
   acts.push(['new',    '新しいリストを作る (端末内)']);
+  acts.push(['update', 'アプリの更新を確認']);
   if (isEdited) acts.push(['revert', { label: '編集を捨ててファイルに戻す', style: 'danger' }]);
   if (local)    acts.push(['delete', { label: 'このリストを削除', style: 'danger' }]);
   acts.push(['cancel', 'キャンセル']);
@@ -1003,7 +1062,9 @@ async function fileAdminDialog() {
   const ch = await alertDialog('ファイルの操作', menuSubtitle(), ...acts.map(a => a[1]));
   const act = acts[ch - 1][0];
 
-  if (act === 'export') {
+  if (act === 'update') {
+    await checkForUpdate(false);
+  } else if (act === 'export') {
     await exportJson();
   } else if (act === 'import') {
     importJson();
@@ -1308,6 +1369,7 @@ window.addEventListener('resize', () => {
 async function startDialog() {
   /* Pythonista 版の load_word_list() と同じ流れ:
      lists/ の JSON を一覧 → 1 個なら即決、複数なら選ばせる → 順序を聞く */
+  checkForUpdate(true);          // 版が古ければ勝手に直す (待たない)
   await loadEntries();
   await pickFileDialog(true);
   warmCache();
