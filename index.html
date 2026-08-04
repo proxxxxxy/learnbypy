@@ -60,11 +60,44 @@
   .lbl > .inner.block{text-align:left; white-space:pre;}
   .lbl > .inner.block.wrap{white-space:pre-wrap;}
 
+  /* ── 入力して答えるとき (穴埋め / 記述) の解答欄 ── */
+  #answer-area{
+    position:absolute; left:20px; right:20px;
+    top:calc(var(--safe-t) + 42%);
+    display:none; flex-direction:column; gap:7px;
+    overflow-y:auto; -webkit-overflow-scrolling:touch;
+    /* キーボードが出たらその上までに収める */
+    max-height:calc(100% - var(--safe-t) - 42% - var(--kb, 0px) - 96px);
+  }
+  #answer-area.on{display:flex;}
+  .ans-row .line{display:flex; align-items:center; gap:8px;}
+  .ans-row .n{
+    flex:0 0 auto; min-width:2.4em; text-align:right;
+    font-size:16px; color:#555;
+  }
+  .ans-row input{
+    flex:1 1 auto; min-width:0; padding:8px 10px;
+    border:1px solid #c8c8cc; border-radius:8px;
+    font-family:var(--font-ui); font-size:17px; background:#fff; color:#000;
+    -webkit-user-select:text; user-select:text;
+  }
+  .ans-row input:focus{outline:none; border-color:#0a58ca;}
+  .ans-row .mark{flex:0 0 auto; width:1.3em; text-align:center; font-size:19px;}
+  .ans-row.ok  input{border-color:var(--green); background:#f3fbf4;}
+  .ans-row.ok  .mark{color:var(--green);}
+  .ans-row.ng  input{border-color:var(--red);   background:#fdf4f4;}
+  .ans-row.ng  .mark{color:var(--red);}
+  .ans-row .correct{
+    margin:3px 0 2px calc(2.4em + 8px);
+    font-size:15px; color:var(--green); white-space:pre-wrap; word-break:break-word;
+  }
+
   #stat{
     position:absolute; left:20px; right:20px;
     bottom:calc(var(--safe-b) + 20px);
     text-align:center; font-size:14px; color:#666;
   }
+  body.kb-open #btnrow, body.kb-open #stat{display:none;}
 
   #btnrow{
     position:absolute; left:20px; right:20px;
@@ -83,6 +116,11 @@
   #btn-correct{background:var(--green);}
   #btn-wrong{background:var(--red);}
   #btn-back{background:var(--slate);}
+  /* 自動採点の結果を「たぶんこっち」として指し示す */
+  .bigbtn.suggest{box-shadow:0 0 0 3px #222;}
+  #btn-check{display:none; background:#0a58ca; font-size:22px;}
+  #btnrow.input-mode #btn-check{display:block;}
+  #btnrow.input-mode .bigbtn:not(#btn-check){display:none;}
 
   .roundbtn{
     position:absolute; top:calc(var(--safe-t) + 14px);
@@ -184,7 +222,7 @@
   #form-box .ed-bar{border-bottom:1px solid #e2e2e4;}
   #form-body{overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 16px 20px;}
   #form-body label{display:block; font-size:13px; color:#666; margin:12px 0 5px; font-weight:700;}
-  #form-body input, #form-body textarea{
+  #form-body input, #form-body textarea, #form-body select{
     width:100%; padding:10px 12px; border:1px solid #d5d5d8; border-radius:9px;
     font-family:var(--font-ui); font-size:16px; background:#fff; color:#000;
     -webkit-user-select:text; user-select:text; resize:vertical;
@@ -199,7 +237,9 @@
 <div id="card-view">
   <div class="lbl" id="word"></div>
   <div class="lbl" id="mean"></div>
+  <div id="answer-area"></div>
   <div id="btnrow">
+    <button class="bigbtn" id="btn-check">答え合わせ</button>
     <button class="bigbtn" id="btn-correct">✔︎</button>
     <button class="bigbtn" id="btn-wrong">✘</button>
     <button class="bigbtn" id="btn-back">↩︎</button>
@@ -349,12 +389,68 @@ let isEdited   = false; // ファイルから書き換えられているか
 
 const isLocal = f => String(f).startsWith('local:');
 
+/* 出題形式
+     ''      … めくって答えを見るだけ (Pythonista 版と同じ)
+     'fill'  … 問題文の (1)(2)… に対応する入力欄を出す穴埋め
+     'write' … 答えを 1 つの入力欄に書く用語記述式 (自動採点)
+     'self'  … 同じく入力欄だが、長い説明用に○×を付けず模範解答だけ出す */
+const TYPES = ['', 'fill', 'write', 'self'];
+const normType = t => (TYPES.includes(String(t || '').toLowerCase()) ? String(t || '').toLowerCase() : '');
+
+/* [番号, 問題文, 答え] / [番号, 問題文, 答え, 形式] / {no,q,a,type} を受ける */
 function normalizeCards(raw) {
   if (!Array.isArray(raw)) throw new Error('配列ではありません');
   return raw.map((row, i) => {
-    if (!Array.isArray(row) || row.length < 3) throw new Error(`${i + 1} 番目の要素の形式が違います`);
-    return [row[0], String(row[1] ?? ''), String(row[2] ?? '')];
+    if (Array.isArray(row)) {
+      if (row.length < 3) throw new Error(`${i + 1} 番目の要素の形式が違います`);
+      return [row[0], String(row[1] ?? ''), String(row[2] ?? ''), normType(row[3])];
+    }
+    if (row && typeof row === 'object') {
+      const no = row.no ?? row.n ?? (i + 1);
+      const q = row.q ?? row.question ?? row.問題 ?? '';
+      const a = row.a ?? row.answer ?? row.答え ?? '';
+      return [no, String(q), String(a), normType(row.type ?? row.形式)];
+    }
+    throw new Error(`${i + 1} 番目の要素の形式が違います`);
   });
+}
+
+/* 保存・書き出し用。形式なしなら 3 要素のまま (元の list.json と同じ形) */
+const toRow = c => (c[3] ? [c[0], c[1], c[2], c[3]] : [c[0], c[1], c[2]]);
+const rowsJson = list => JSON.stringify(list.map(toRow), null, 2);
+
+/* ── 採点 ──────────────────────────────────────────────
+   全角/半角・大文字小文字・空白・句読点・ひらがな/カタカナの違いは吸収する。
+   答えに「A|B」と書くと A でも B でも正解になる。                 */
+function norm(s) {
+  return String(s).normalize('NFKC')
+    .replace(/[\s　]/g, '')
+    .replace(/[。、．，.,・]/g, '')
+    .toLowerCase()
+    .replace(/[ぁ-ゖ]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60));
+}
+
+function judge(input, answer) {
+  const v = norm(input);
+  if (!v) return false;
+  return String(answer).split('|').map(norm).filter(Boolean).includes(v);
+}
+
+/* 表示用は「|」の前だけ (別解は採点にのみ使う) */
+const shownAnswer = a => String(a).split('|')[0].trim();
+
+/* 「(1)ワード\n(2)ビット」「(1)PNP, (2)アノード」どちらの書き方も拾う */
+function answerParts(a) {
+  const s = String(a);
+  const re = /[（(](\d+)[）)]/g;
+  const hits = [];
+  let m;
+  while ((m = re.exec(s))) hits.push({ n: m[1], start: m.index, end: re.lastIndex });
+  return hits.map((h, i) => ({
+    n: h.n,
+    text: s.slice(h.end, i + 1 < hits.length ? hits[i + 1].start : s.length)
+           .replace(/^[\s、,]+/, '').replace(/[\s、,\n]+$/, ''),
+  }));
 }
 
 const seedCards = () => normalizeCards(JSON.parse(document.getElementById('seed-deck').textContent));
@@ -441,7 +537,7 @@ const currentDeck = () => ({ name: activeName, cards });
 
 /* エディタでの変更は端末内に保存する (元の JSON ファイルは書き換わらない) */
 function saveDecks() {
-  store.set(editKey(activeFile), JSON.stringify(cards));
+  store.set(editKey(activeFile), rowsJson(cards));
   isEdited = !isLocal(activeFile);
 }
 
@@ -491,11 +587,22 @@ function openForm(title, fields) {
       const lab = document.createElement('label');
       lab.textContent = f.label;
       lab.htmlFor = 'f_' + f.key;
-      const el = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+      let el;
+      if (f.type === 'select') {
+        el = document.createElement('select');
+        (f.options || []).forEach(o => {
+          const op = document.createElement('option');
+          op.value = o.value;
+          op.textContent = o.label;
+          el.appendChild(op);
+        });
+      } else {
+        el = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+        if (f.type !== 'textarea') el.type = 'text';
+        else el.rows = f.rows || 4;
+      }
       el.id = 'f_' + f.key;
       el.dataset.key = f.key;
-      if (f.type !== 'textarea') el.type = 'text';
-      else el.rows = f.rows || 4;
       el.value = f.value ?? '';
       formBody.appendChild(lab);
       formBody.appendChild(el);
@@ -522,7 +629,7 @@ function closeForm(result) {
 formCancel.addEventListener('click', () => closeForm(null));
 formSave.addEventListener('click', () => {
   const out = {};
-  formBody.querySelectorAll('input, textarea').forEach(el => { out[el.dataset.key] = el.value; });
+  formBody.querySelectorAll('input, textarea, select').forEach(el => { out[el.dataset.key] = el.value; });
   closeForm(out);
 });
 
@@ -535,6 +642,7 @@ const elStat = document.getElementById('stat');
 const btnCorrect = document.getElementById('btn-correct');
 const btnWrong   = document.getElementById('btn-wrong');
 const btnBack    = document.getElementById('btn-back');
+const btnRow     = document.getElementById('btnrow');
 const btnMenu    = document.getElementById('btn-menu');
 const btnExit    = document.getElementById('btn-exit');
 
@@ -548,6 +656,9 @@ const state = {
   wrongCards: [],
   showMean: false,
   jpFirst: false,   // 表示方向 (表=問題 / 表=答え)
+  forceFlip: false, // 入力式のカードもめくるだけにする
+  mode: 'flip',     // 今出しているカードの形式
+  checked: false,   // 答え合わせ済みか
 };
 
 /* 答えが複数行なら「番号だけ左端揃え・全体は中央寄せ」で描画。
@@ -589,21 +700,141 @@ function fitFont(el, maxPt, minPt) {
   el.style.fontSize = (size === null ? minPt : size) + 'px';
 }
 
+/* このカードをどう出すか。裏返し表示のときは常にめくるだけ */
+function cardMode(card) {
+  if (state.forceFlip || state.jpFirst) return 'flip';
+  const t = card[3] || '';
+  if (t === 'fill') return answerParts(card[2]).length ? 'fill' : 'write';
+  return (t === 'write' || t === 'self') ? t : 'flip';
+}
+
 function presentCard() {
   if (!state.cards.length) return;
-  const [no, q, a] = state.cards[state.index];
-  const front = state.jpFirst ? a : `${no}. ${q}`;
-  const back  = state.jpFirst ? `${no}. ${q}` : a;
+  const card = state.cards[state.index];
+  const [no, q, a] = card;
+  state.mode = cardMode(card);
 
+  const front = state.jpFirst ? shownAnswer(a) : `${no}. ${q}`;
   renderFace(elWord, front, false);
-  renderFace(elMean, state.showMean ? back : '(タップで裏面表示)', !state.showMean);
+  fitFont(elWord, 40, 14);
+
+  if (state.mode === 'flip') {
+    ansArea.classList.remove('on');
+    elMean.style.display = '';
+    const back = state.jpFirst ? `${no}. ${q}` : shownAnswer(a);
+    renderFace(elMean, state.showMean ? back : '(タップで裏面表示)', !state.showMean);
+    fitFont(elMean, 30, 12);
+    setBtnMode('flip');
+  } else {
+    elMean.style.display = 'none';
+    ansArea.classList.add('on');
+    renderInputs(card);
+    setBtnMode(state.checked ? 'checked' : 'input');
+  }
+
   elStat.textContent =
     `${state.index + 1}/${state.cards.length}   正解 ${state.correct}/${state.attempts}`;
-
   btnBack.disabled = state.history.length === 0;
+}
 
-  fitFont(elWord, 40, 14);
-  fitFont(elMean, 30, 12);
+/* ── 入力して答える (穴埋め / 記述) ────────────────────── */
+const ansArea = document.getElementById('answer-area');
+const btnCheck = document.getElementById('btn-check');
+
+function setBtnMode(m) {
+  btnRow.classList.toggle('input-mode', m === 'input');
+  btnCorrect.classList.remove('suggest');
+  btnWrong.classList.remove('suggest');
+}
+
+function renderInputs(card) {
+  const parts = state.mode === 'fill'
+    ? answerParts(card[2])
+    : [{ n: '答え', text: card[2] }];
+  const single = state.mode !== 'fill';
+
+  ansArea.innerHTML = '';
+  parts.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'ans-row';
+
+    const line = document.createElement('div');
+    line.className = 'line';
+
+    const label = document.createElement('span');
+    label.className = 'n';
+    label.textContent = single ? p.n : `(${p.n})`;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
+    input.enterKeyHint = i + 1 < parts.length ? 'next' : 'done';
+    input.dataset.answer = p.text;
+    input.addEventListener('keydown', ev => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      const next = ansArea.querySelectorAll('input')[i + 1];
+      if (next) next.focus(); else checkAnswers();
+    });
+
+    const mark = document.createElement('span');
+    mark.className = 'mark';
+
+    line.append(label, input, mark);
+    row.appendChild(line);
+    ansArea.appendChild(row);
+  });
+
+  if (state.checked) showResults();
+  else ansArea.scrollTop = 0;
+}
+
+function checkAnswers() {
+  if (state.checked) return;
+  state.checked = true;
+  showResults();
+  const el = document.activeElement;
+  if (el && el.blur) el.blur();       // キーボードを閉じてボタンを出す
+  setBtnMode('checked');
+  /* 自己採点タイプは○×を出さないので、どちらのボタンも勧めない */
+  if (state.mode !== 'self') (state.allOk ? btnCorrect : btnWrong).classList.add('suggest');
+}
+
+function showResults() {
+  const inputs = [...ansArea.querySelectorAll('input')];
+
+  if (state.mode === 'self') {
+    inputs.forEach(input => {
+      input.readOnly = true;
+      const row = input.closest('.ans-row');
+      if (row.querySelector('.correct')) return;
+      const c = document.createElement('div');
+      c.className = 'correct';
+      c.textContent = shownAnswer(input.dataset.answer);
+      row.appendChild(c);
+    });
+    state.allOk = false;
+    return;
+  }
+
+  let allOk = true;
+  inputs.forEach(input => {
+    const ok = judge(input.value, input.dataset.answer);
+    if (!ok) allOk = false;
+    const row = input.closest('.ans-row');
+    row.classList.add(ok ? 'ok' : 'ng');
+    row.querySelector('.mark').textContent = ok ? '○' : '×';
+    input.readOnly = true;
+    if (!ok && !row.querySelector('.correct')) {
+      const c = document.createElement('div');
+      c.className = 'correct';
+      c.textContent = shownAnswer(input.dataset.answer);
+      row.appendChild(c);
+    }
+  });
+  state.allOk = allOk;
 }
 
 function markCorrect() {
@@ -628,12 +859,12 @@ function goBack() {
   if (ok) state.correct--;
   else if (state.wrongCards[state.wrongCards.length - 1] === card) state.wrongCards.pop();
   state.attempts--;
-  state.showMean = false;
+  state.showMean = state.checked = false;
   presentCard();
 }
 
 function nextCard() {
-  state.showMean = false;
+  state.showMean = state.checked = false;
   state.index++;
   if (state.index >= state.cards.length) finishDialog();
   else presentCard();
@@ -655,7 +886,7 @@ function resetWith(list, shuffle) {
   state.index = state.correct = state.attempts = 0;
   state.history = [];
   state.wrongCards = [];
-  state.showMean = false;
+  state.showMean = state.checked = false;
   presentCard();
 }
 
@@ -685,6 +916,7 @@ async function menuDialog() {
     '順番で最初から',
     'シャッフルで最初から',
     '表示方向を切替',
+    state.forceFlip ? '入力して答える' : 'めくるだけにする',
     'リストを選ぶ',
     '問題を編集',
     'ファイルの操作',
@@ -692,10 +924,11 @@ async function menuDialog() {
 
   if (ch === 1) resetWith(state.allCards, false);
   else if (ch === 2) resetWith(state.allCards, true);
-  else if (ch === 3) { state.jpFirst = !state.jpFirst; presentCard(); }
-  else if (ch === 4) await pickFileDialog();
-  else if (ch === 5) openEditor();
-  else if (ch === 6) await fileAdminDialog();
+  else if (ch === 3) { state.jpFirst = !state.jpFirst; state.checked = false; presentCard(); }
+  else if (ch === 4) { state.forceFlip = !state.forceFlip; state.checked = false; presentCard(); }
+  else if (ch === 5) await pickFileDialog();
+  else if (ch === 6) openEditor();
+  else if (ch === 7) await fileAdminDialog();
 }
 
 const menuSubtitle = () =>
@@ -778,7 +1011,7 @@ async function addLocalEntry(name, list) {
   const entry = { file, name, local: true };
   saveLocalEntries(localEntries().concat([entry]));
   entries.push(entry);
-  store.set(editKey(file), JSON.stringify(list));
+  store.set(editKey(file), rowsJson(list));
   activeFile = file;
   activeName = name;
   store.set(LAST_KEY, file);
@@ -810,7 +1043,7 @@ function importJson() {
           const f = 'local:' + Date.now().toString(36);
           saveLocalEntries(localEntries().concat([{ file: f, name }]));
           entries.push({ file: f, name, local: true });
-          store.set(editKey(f), JSON.stringify(list));
+          store.set(editKey(f), rowsJson(list));
         }
       } catch (e) {
         await alertDialog('読み込めません', String(e.message || e), 'OK');
@@ -831,7 +1064,7 @@ function exportFileName() {
 
 async function exportJson() {
   const name = exportFileName();
-  const blob = new Blob([JSON.stringify(cards, null, 2)], { type: 'application/json' });
+  const blob = new Blob([rowsJson(cards)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -889,7 +1122,7 @@ function renderEditor() {
 
     const no = document.createElement('div');
     no.className = 'no';
-    no.textContent = `No. ${card[0]}`;
+    no.textContent = `No. ${card[0]}` + (card[3] ? `  ・  ${TYPE_LABEL[card[3]]}` : '');
 
     const q = document.createElement('div');
     q.className = 'q';
@@ -920,33 +1153,42 @@ function mkEdBtn(label, fn) {
   return b;
 }
 
-const CARD_FIELDS = (no, q, a) => ([
+const TYPE_LABEL = {
+  '': 'めくるだけ', fill: '穴埋め入力', write: '記述式(自動採点)', self: '記述式(自己採点)',
+};
+
+const CARD_FIELDS = (no, q, a, type) => ([
   { key: 'no', label: '番号', value: no,
     hint: '教科書の問題番号など。表面に「番号. 問題文」として出ます。' },
+  { key: 'type', label: '形式', value: type || '', type: 'select',
+    options: TYPES.map(t => ({ value: t, label: TYPE_LABEL[t] })),
+    hint: '穴埋め入力: 問題文の (1)(2)… に対応する入力欄が出ます。\n'
+        + '記述式(自動採点): 用語など短い答え向け。○×が付きます。\n'
+        + '記述式(自己採点): 長い説明向け。模範解答だけ出るので自分で ✔/✘ を押します。' },
   { key: 'q', label: '問題文', value: q, type: 'textarea', rows: 6 },
   { key: 'a', label: '答え', value: a, type: 'textarea', rows: 7,
-    hint: '改行で区切ると、(1)(2)… の行が左端揃えで縦に並びます。' },
+    hint: '改行で区切ると、(1)(2)… の行が左端揃えで縦に並びます。\n'
+        + '「ホール|正孔」のように | で区切ると、どちらでも正解になります。' },
 ]);
 
 async function editCard(i) {
   const d = currentDeck();
   const c = d.cards[i];
-  const r = await openForm('問題の編集', CARD_FIELDS(c[0], c[1], c[2]));
+  const r = await openForm('問題の編集', CARD_FIELDS(c[0], c[1], c[2], c[3]));
   if (!r) return;
-  d.cards[i] = [parseNo(r.no), r.q.trim(), r.a.trim()];
+  d.cards[i] = [parseNo(r.no), r.q.trim(), r.a.trim(), normType(r.type)];
   saveDecks();
   renderEditor();
 }
 
 async function addCard() {
   const d = currentDeck();
-  const nextNo = d.cards.length
-    ? (Number(d.cards[d.cards.length - 1][0]) || d.cards.length) + 1
-    : 1;
-  const r = await openForm('問題の追加', CARD_FIELDS(nextNo, '', ''));
+  const last = d.cards[d.cards.length - 1];
+  const nextNo = d.cards.length ? (Number(last[0]) || d.cards.length) + 1 : 1;
+  const r = await openForm('問題の追加', CARD_FIELDS(nextNo, '', '', last ? last[3] : ''));
   if (!r) return;
   if (!r.q.trim() && !r.a.trim()) return;
-  d.cards.push([parseNo(r.no), r.q.trim(), r.a.trim()]);
+  d.cards.push([parseNo(r.no), r.q.trim(), r.a.trim(), normType(r.type)]);
   saveDecks();
   renderEditor();
   edList.scrollTop = edList.scrollHeight;
@@ -994,15 +1236,32 @@ btnExit.addEventListener('click', async () => {
 
 /* 画面タップで裏表を切り替え (ボタン上は無視) */
 document.getElementById('card-view').addEventListener('click', ev => {
-  if (ev.target.closest('button')) return;
+  if (ev.target.closest('button, #answer-area')) return;
+  if (state.mode !== 'flip') return;   // 入力式のカードはめくらない
   state.showMean = !state.showMean;
   presentCard();
 });
+
+btnCheck.addEventListener('click', checkAnswers);
+
+/* ソフトキーボードの高さを CSS に流して、解答欄が隠れないようにする */
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  const syncKb = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb', kb + 'px');
+    document.body.classList.toggle('kb-open', kb > 60);
+  };
+  vv.addEventListener('resize', syncKb);
+  vv.addEventListener('scroll', syncKb);
+}
 
 /* PC 用ショートカット */
 document.addEventListener('keydown', ev => {
   if (dlgLayer.classList.contains('on') || formLayer.classList.contains('on')
       || editor.classList.contains('on')) return;
+  if (ev.target.matches('input, textarea, select')) return;
+  if (state.mode !== 'flip' && !state.checked) return;
   if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); state.showMean = !state.showMean; presentCard(); }
   else if (ev.key === 'ArrowRight' || ev.key === 'o') markCorrect();
   else if (ev.key === 'ArrowDown' || ev.key === 'x') markWrong();
@@ -1013,7 +1272,9 @@ let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (state.cards.length) presentCard();
+    if (!state.cards.length) return;
+    if (state.mode !== 'flip') fitFont(elWord, 40, 14);   // 入力内容を消さない
+    else presentCard();
   }, 80);
 });
 
