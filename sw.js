@@ -6,7 +6,7 @@
    そのままだと「network-first のはずが古い index.html が返る」ことがある。
    (ホーム画面に追加した iOS の Web アプリで特に起こりやすい)
    そこでネットワーク取得は必ず cache:'no-store' で行う。 */
-const CACHE = 'flashcards-v6';
+const CACHE = 'flashcards-v7';
 const ASSETS = ['./', './index.html', './manifest.json', './lists/index.json'];
 
 self.addEventListener('install', ev => {
