@@ -66,6 +66,8 @@
      既定では折り返さず、縮めても入らないときだけ .wrap を付けて折り返す */
   .lbl > .inner.block{text-align:left; white-space:pre;}
   .lbl > .inner.block.wrap{white-space:pre-wrap;}
+  /* 折り返しで末尾1文字だけが孤立したとき、その末尾だけ少し詰める */
+  .orphan-tail{display:inline; white-space:nowrap; font-size:.82em; letter-spacing:-.02em;}
 
   /* ── 入力して答えるとき (穴埋め / 選択 / 記述) の解答欄 ── */
   #response-panel{display:contents;}
@@ -413,7 +415,7 @@
 'use strict';
 
 /* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
-const APP_VERSION = '2026-08-05e';
+const APP_VERSION = '2026-08-05f';
 
 /* ══════════════════════════════════════════════════════════
    版ずれの自己修復
@@ -794,11 +796,12 @@ const formSave   = document.getElementById('form-save');
 const formCancel = document.getElementById('form-cancel');
 let formResolve = null;
 
-/* fields: [{key, label, value, type:'text'|'textarea', hint, rows}] → 値の object か null */
+/* fields: [{key, label, value, type:'text'|'password'|'textarea', hint, rows}] → 値の object か null */
 function openForm(title, fields) {
   return new Promise(resolve => {
     formResolve = resolve;
     formTitle.textContent = title;
+    formSave.textContent = fields.some(f => f.type === 'password') ? '確認' : '保存';
     formBody.innerHTML = '';
     fields.forEach(f => {
       const lab = document.createElement('label');
@@ -815,12 +818,18 @@ function openForm(title, fields) {
         });
       } else {
         el = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
-        if (f.type !== 'textarea') el.type = 'text';
+        if (f.type !== 'textarea') el.type = f.type === 'password' ? 'password' : 'text';
         else el.rows = f.rows || 4;
       }
       el.id = 'f_' + f.key;
       el.dataset.key = f.key;
       el.value = f.value ?? '';
+      if (f.type === 'password') {
+        el.autocomplete = 'current-password';
+        el.addEventListener('keydown', ev => {
+          if (ev.key === 'Enter') { ev.preventDefault(); formSave.click(); }
+        });
+      }
       formBody.appendChild(lab);
       formBody.appendChild(el);
       if (f.hint) {
@@ -838,6 +847,7 @@ function openForm(title, fields) {
 
 function closeForm(result) {
   formLayer.classList.remove('on');
+  formBody.querySelectorAll('input[type="password"]').forEach(input => { input.value = ''; });
   const r = formResolve;
   formResolve = null;
   if (r) r(result);
@@ -889,10 +899,62 @@ function renderFace(el, text, dim) {
   el.appendChild(inner);
 }
 
+function clearOrphanFixes(inner) {
+  inner.querySelectorAll('.orphan-tail').forEach(span => span.replaceWith(document.createTextNode(span.textContent)));
+  inner.normalize();
+}
+
+/* 各明示行の実際の折り返し位置を測り、最終段に1文字だけ残る場合だけ末尾を縮める。 */
+function fixSingleGlyphWraps(inner) {
+  if (!document.createRange) return;
+  const node = inner.firstChild;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+  const text = node.data;
+  const lines = [];
+  let start = 0;
+  for (let i = 0; i <= text.length; i++) {
+    if (i === text.length || text[i] === '\n') {
+      lines.push({ start, end: i });
+      start = i + 1;
+    }
+  }
+
+  const fixes = [];
+  lines.forEach(line => {
+    const glyphs = [];
+    for (let i = line.start; i < line.end; i++) {
+      if (/\s/.test(text[i])) continue;
+      const range = document.createRange();
+      range.setStart(node, i);
+      range.setEnd(node, i + 1);
+      const rect = range.getBoundingClientRect();
+      if (rect.width || rect.height) glyphs.push({ index: i, top: rect.top });
+    }
+    if (glyphs.length < 3) return;
+    const lastTop = glyphs[glyphs.length - 1].top;
+    const lastRow = glyphs.filter(g => Math.abs(g.top - lastTop) < 1);
+    if (lastRow.length !== 1) return;
+
+    const orphanIndex = lastRow[0].index;
+    fixes.push({ start: Math.max(line.start, orphanIndex - 2), end: orphanIndex + 1 });
+  });
+
+  /* 後ろから包めば、前方の文字オフセットは変わらない。 */
+  fixes.sort((a, b) => b.start - a.start).forEach(fix => {
+    const range = document.createRange();
+    range.setStart(node, fix.start);
+    range.setEnd(node, fix.end);
+    const span = document.createElement('span');
+    span.className = 'orphan-tail';
+    range.surroundContents(span);
+  });
+}
+
 /* Pythonista の _fit_font 相当 — 枠に収まる最大サイズを二分探索。
    中身 (.inner) は高さ制限を受けないので実寸がそのまま測れる */
 function fitFont(el, maxPt, minPt) {
   const inner = el.firstElementChild;
+  clearOrphanFixes(inner);
 
   const search = () => {
     let lo = minPt, hi = maxPt, best = null;
@@ -917,6 +979,7 @@ function fitFont(el, maxPt, minPt) {
   el.classList.toggle('scroll', size === null);
   el.style.fontSize = (size === null ? minPt : size) + 'px';
   if (size === null) el.scrollTop = 0;
+  fixSingleGlyphWraps(inner);
 }
 
 /* このカードをどう出すか。裏返し表示のときは常にめくるだけ */
@@ -1365,10 +1428,25 @@ async function exportJson() {
 const editor  = document.getElementById('editor');
 const edList  = document.getElementById('ed-list');
 const edTitle = document.getElementById('ed-title');
+const EDITOR_PASSWORD = 'test';
+let editorUnlocked = false;
 
-function openEditor() {
+async function openEditor() {
+  if (!editorUnlocked) {
+    const result = await openForm('管理者確認', [{
+      key: 'password', label: '編集用パスワード', value: '', type: 'password',
+      hint: '問題の追加・変更・削除には管理者パスワードが必要です。',
+    }]);
+    if (!result) return false;
+    if (result.password !== EDITOR_PASSWORD) {
+      await alertDialog('開けません', 'パスワードが違います', 'OK');
+      return false;
+    }
+    editorUnlocked = true;
+  }
   editor.classList.add('on');
   renderEditor();
+  return true;
 }
 
 function closeEditor() {
