@@ -173,7 +173,8 @@ lists/
 index.html                 アプリ本体 (これ 1 つで動く)
 manifest.json / sw.js      ホーム画面追加とオフライン動作用
 lists/index.json           問題リストの一覧
-lists/semiconductor.json   「半導体」23問
+lists/semiconductor.json   「半導体」23問 (めくるだけ)
+lists/system-safety.json   「システム安全入門」21問 (穴埋め/記述/自己採点)
 pythonista/                移植元の Pythonista 版 (参考用)
 ```
 

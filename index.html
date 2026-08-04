@@ -34,7 +34,11 @@
   }
 
   /* ─────────────  カード画面  ───────────── */
-  #card-view{position:fixed; inset:0; background:#fff;}
+  #card-view{
+    position:fixed; inset:0; background:#fff;
+    /* ボタン行の上端。解答欄がここに潜り込まないよう共有する */
+    --btn-top:min(calc(var(--safe-t) + 75%), calc(100% - var(--safe-b) - 110px));
+  }
 
   /* Pythonista 版のレイアウトをそのまま踏襲
      word: y=14%,  mean: y=44%,  buttons: y=75%,  stat: 下端 */
@@ -55,6 +59,9 @@
   }
   #mean.hidden-face{opacity:.25;}
   .lbl > .inner{max-width:100%; min-width:0;}
+  /* 最小サイズでも入りきらない長文は、切り落とさずスクロールさせる */
+  .lbl.scroll{align-items:flex-start; overflow-y:auto; -webkit-overflow-scrolling:touch;}
+  .lbl.scroll > .inner{width:100%;}
   /* 複数行の答えは「番号だけ左端揃え・ブロック全体は中央寄せ」。
      既定では折り返さず、縮めても入らないときだけ .wrap を付けて折り返す */
   .lbl > .inner.block{text-align:left; white-space:pre;}
@@ -63,13 +70,20 @@
   /* ── 入力して答えるとき (穴埋め / 記述) の解答欄 ── */
   #answer-area{
     position:absolute; left:20px; right:20px;
-    top:calc(var(--safe-t) + 42%);
+    top:calc(var(--safe-t) + 41%);
     display:none; flex-direction:column; gap:7px;
     overflow-y:auto; -webkit-overflow-scrolling:touch;
-    /* キーボードが出たらその上までに収める */
-    max-height:calc(100% - var(--safe-t) - 42% - var(--kb, 0px) - 96px);
+    /* 下端はボタン行の手前まで。キーボードが出ているときはその上まで */
+    max-height:min(
+      calc(var(--btn-top) - var(--safe-t) - 41% - 10px),
+      calc(100% - var(--kb, 0px) - var(--safe-t) - 41% - 10px));
   }
   #answer-area.on{display:flex;}
+  /* 入力式のときは問題文を上に広げる。丸ボタンの下から始める */
+  body.answering #word{
+    top:calc(var(--safe-t) + 86px);
+    height:calc(41% - 94px);
+  }
   .ans-row .line{display:flex; align-items:center; gap:8px;}
   .ans-row .n{
     flex:0 0 auto; min-width:2.4em; text-align:right;
@@ -103,7 +117,7 @@
     position:absolute; left:20px; right:20px;
     /* 基本は Pythonista と同じ 75% の位置。画面が低いときだけ成績表示に
        かぶらないよう下端から持ち上げる */
-    top:min(calc(var(--safe-t) + 75%), calc(100% - var(--safe-b) - 110px));
+    top:var(--btn-top);
     display:flex; gap:20px;
   }
   .bigbtn{
@@ -140,6 +154,7 @@
     #btn-exit{right:68px;}
     #word{top:calc(var(--safe-t) + 62px); height:32%;}
     #mean{top:calc(var(--safe-t) + 62px + 32%); height:22%;}
+    body.answering #word{top:calc(var(--safe-t) + 62px); height:calc(41% - 70px);}
   }
 
   /* ─────────────  ダイアログ (console.alert 相当)  ───────────── */
@@ -697,7 +712,9 @@ function fitFont(el, maxPt, minPt) {
     inner.classList.add('wrap');
     size = search();
   }
+  el.classList.toggle('scroll', size === null);
   el.style.fontSize = (size === null ? minPt : size) + 'px';
+  if (size === null) el.scrollTop = 0;
 }
 
 /* このカードをどう出すか。裏返し表示のときは常にめくるだけ */
@@ -713,6 +730,8 @@ function presentCard() {
   const card = state.cards[state.index];
   const [no, q, a] = card;
   state.mode = cardMode(card);
+  /* ラベルの高さが変わるので、フォントを測る前に切り替えておく */
+  document.body.classList.toggle('answering', state.mode !== 'flip');
 
   const front = state.jpFirst ? shownAnswer(a) : `${no}. ${q}`;
   renderFace(elWord, front, false);
@@ -748,10 +767,11 @@ function setBtnMode(m) {
 }
 
 function renderInputs(card) {
-  const parts = state.mode === 'fill'
-    ? answerParts(card[2])
-    : [{ n: '答え', text: card[2] }];
-  const single = state.mode !== 'fill';
+  /* 答えが (1)(2)… に分かれていれば、その数だけ入力欄を出す。
+     記述式(write)は答えが 1 つなので常に 1 欄 */
+  let parts = state.mode === 'write' ? [] : answerParts(card[2]);
+  const numbered = parts.length > 0;
+  if (!numbered) parts = [{ n: '答え', text: card[2] }];
 
   ansArea.innerHTML = '';
   parts.forEach((p, i) => {
@@ -763,7 +783,7 @@ function renderInputs(card) {
 
     const label = document.createElement('span');
     label.className = 'n';
-    label.textContent = single ? p.n : `(${p.n})`;
+    label.textContent = numbered ? `(${p.n})` : p.n;
 
     const input = document.createElement('input');
     input.type = 'text';
