@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Flash-Card Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cards">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='14' width='52' height='36' rx='6' fill='none' stroke='%23333' stroke-width='5'/%3E%3Cpath d='M19 30h26M19 40h16' stroke='%23333' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%23ffffff'/%3E%3Crect x='34' y='46' width='112' height='76' rx='10' fill='none' stroke='%23333' stroke-width='8'/%3E%3Cpath d='M58 84h64M58 104h40' stroke='%23333' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --font-ui: "Avenir Next", Avenir, "Helvetica Neue", Helvetica,
+               "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif;
+    --green:#43a047;
+    --red:#e53935;
+    --slate:#607d8b;
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none;}
+  body{
+    background:#fff; color:#000;
+    font-family:var(--font-ui);
+    -webkit-text-size-adjust:100%;
+    -webkit-user-select:none; user-select:none;
+    touch-action:manipulation;
+  }
+
+  /* ─────────────  カード画面  ───────────── */
+  #card-view{position:fixed; inset:0; background:#fff;}
+
+  /* Pythonista 版のレイアウトをそのまま踏襲
+     word: y=14%,  mean: y=44%,  buttons: y=75%,  stat: 下端 */
+  .lbl{
+    position:absolute; left:20px; right:20px;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center; line-height:1.22;
+    white-space:pre-wrap; word-break:break-word; overflow:hidden;
+  }
+  #word{
+    top:calc(var(--safe-t) + 14%); height:26%;
+    font-weight:700; font-size:40px;
+  }
+  #mean{
+    top:calc(var(--safe-t) + 44%); height:26%;
+    font-weight:400; font-size:30px; color:#555;
+    transition:opacity .12s ease;
+  }
+  #mean.hidden-face{opacity:.25;}
+  .lbl > .inner{max-width:100%; min-width:0;}
+  /* 複数行の答えは「番号だけ左端揃え・ブロック全体は中央寄せ」。
+     既定では折り返さず、縮めても入らないときだけ .wrap を付けて折り返す */
+  .lbl > .inner.block{text-align:left; white-space:pre;}
+  .lbl > .inner.block.wrap{white-space:pre-wrap;}
+
+  #stat{
+    position:absolute; left:20px; right:20px;
+    bottom:calc(var(--safe-b) + 20px);
+    text-align:center; font-size:14px; color:#666;
+  }
+
+  #btnrow{
+    position:absolute; left:20px; right:20px;
+    /* 基本は Pythonista と同じ 75% の位置。画面が低いときだけ成績表示に
+       かぶらないよう下端から持ち上げる */
+    top:min(calc(var(--safe-t) + 75%), calc(100% - var(--safe-b) - 110px));
+    display:flex; gap:20px;
+  }
+  .bigbtn{
+    flex:1 1 0; height:64px; border:0; border-radius:8px;
+    font-family:var(--font-ui); font-weight:700; font-size:34px;
+    color:#fff; cursor:pointer;
+  }
+  .bigbtn:active{filter:brightness(.88);}
+  .bigbtn:disabled{opacity:.35;}
+  #btn-correct{background:var(--green);}
+  #btn-wrong{background:var(--red);}
+  #btn-back{background:var(--slate);}
+
+  .roundbtn{
+    position:absolute; top:calc(var(--safe-t) + 14px);
+    width:64px; height:64px; border:0; border-radius:32px;
+    font-family:"Helvetica Neue", Helvetica, var(--font-ui);
+    font-size:34px; line-height:1; cursor:pointer;
+  }
+  .roundbtn:active{filter:brightness(.9);}
+  #btn-menu{right:14px; background:rgba(230,230,230,.75); color:#000;}
+  #btn-exit{right:88px; background:rgba(230,77,77,.75); color:#fff;}
+
+  /* 横向きなど画面が低いとき: 文字が右上の丸ボタンに潜り込まないよう詰める */
+  @media (max-height:500px){
+    .roundbtn{width:48px; height:48px; border-radius:24px; font-size:26px;
+              top:calc(var(--safe-t) + 8px);}
+    #btn-menu{right:12px;}
+    #btn-exit{right:68px;}
+    #word{top:calc(var(--safe-t) + 62px); height:32%;}
+    #mean{top:calc(var(--safe-t) + 62px + 32%); height:22%;}
+  }
+
+  /* ─────────────  ダイアログ (console.alert 相当)  ───────────── */
+  #dlg-layer{
+    position:fixed; inset:0; z-index:50;
+    background:rgba(0,0,0,.28);
+    display:none; align-items:center; justify-content:center;
+    padding:24px; padding-top:calc(24px + var(--safe-t)); padding-bottom:calc(24px + var(--safe-b));
+    -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+  }
+  #dlg-layer.on{display:flex;}
+  #dlg{
+    width:100%; max-width:340px; max-height:100%;
+    background:#fff; border-radius:14px; overflow:auto;
+    box-shadow:0 12px 40px rgba(0,0,0,.28);
+    padding:20px 18px 14px;
+  }
+  #dlg h2{margin:0 0 4px; font-size:18px; font-weight:700; text-align:center;}
+  #dlg p{margin:0 0 14px; font-size:14px; color:#666; text-align:center; white-space:pre-wrap;}
+  #dlg p:empty{display:none; margin:0;}
+  #dlg .opts{display:flex; flex-direction:column; gap:8px; margin-top:12px;}
+  #dlg button{
+    width:100%; padding:13px 10px; border:0; border-radius:9px;
+    background:#f0f0f2; color:#0a58ca;
+    font-family:var(--font-ui); font-size:16px; cursor:pointer;
+  }
+  #dlg button:active{background:#e2e2e6;}
+  #dlg button.primary{background:#0a58ca; color:#fff;}
+  #dlg button.danger{color:#c62828;}
+
+  /* ─────────────  エディタ画面  ───────────── */
+  #editor{
+    position:fixed; inset:0; z-index:40; background:#f7f7f8;
+    display:none; flex-direction:column;
+    padding-top:var(--safe-t); padding-bottom:var(--safe-b);
+  }
+  #editor.on{display:flex;}
+  .ed-bar{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 14px; background:#fff; border-bottom:1px solid #e2e2e4;
+    flex:0 0 auto;
+  }
+  .ed-bar h1{flex:1 1 auto; margin:0; font-size:17px; font-weight:700;
+             overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .ed-bar button{
+    border:0; border-radius:8px; padding:9px 13px;
+    background:#ececed; color:#0a58ca;
+    font-family:var(--font-ui); font-size:15px; cursor:pointer; white-space:nowrap;
+  }
+  .ed-bar button.primary{background:#0a58ca; color:#fff;}
+  #ed-list{flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:12px;}
+  .ed-empty{padding:40px 20px; text-align:center; color:#888; font-size:15px; line-height:1.7;}
+  .ed-card{
+    background:#fff; border-radius:12px; padding:12px 14px; margin-bottom:10px;
+    box-shadow:0 1px 3px rgba(0,0,0,.09);
+  }
+  .ed-card .no{font-size:12px; color:#888; font-weight:700; margin-bottom:4px;}
+  .ed-card .q{font-size:15px; line-height:1.5; margin-bottom:6px; word-break:break-word;}
+  .ed-card .a{font-size:13px; color:#666; line-height:1.5; white-space:pre-wrap;
+              word-break:break-word; max-height:6em; overflow:hidden;}
+  .ed-card .row{display:flex; gap:8px; margin-top:10px;}
+  .ed-card .row button{
+    border:0; border-radius:7px; padding:7px 12px; background:#f0f0f2;
+    color:#0a58ca; font-family:var(--font-ui); font-size:14px; cursor:pointer;
+  }
+  .ed-card .row button.del{color:#c62828;}
+
+  /* 入力フォーム */
+  #form-layer{
+    position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.28);
+    display:none; align-items:flex-end; justify-content:center;
+  }
+  #form-layer.on{display:flex;}
+  #form-box{
+    width:100%; max-width:560px; max-height:92%;
+    background:#fff; border-radius:16px 16px 0 0;
+    display:flex; flex-direction:column; overflow:hidden;
+    padding-bottom:var(--safe-b);
+  }
+  #form-box .ed-bar{border-bottom:1px solid #e2e2e4;}
+  #form-body{overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 16px 20px;}
+  #form-body label{display:block; font-size:13px; color:#666; margin:12px 0 5px; font-weight:700;}
+  #form-body input, #form-body textarea{
+    width:100%; padding:10px 12px; border:1px solid #d5d5d8; border-radius:9px;
+    font-family:var(--font-ui); font-size:16px; background:#fff; color:#000;
+    -webkit-user-select:text; user-select:text; resize:vertical;
+  }
+  #form-body textarea{line-height:1.55;}
+  #form-body .hint{font-size:12px; color:#999; margin-top:6px; line-height:1.6;}
+</style>
+</head>
+<body>
+
+<!-- ══════════ カード画面 ══════════ -->
+<div id="card-view">
+  <div class="lbl" id="word"></div>
+  <div class="lbl" id="mean"></div>
+  <div id="btnrow">
+    <button class="bigbtn" id="btn-correct">✔︎</button>
+    <button class="bigbtn" id="btn-wrong">✘</button>
+    <button class="bigbtn" id="btn-back">↩︎</button>
+  </div>
+  <button class="roundbtn" id="btn-exit">✕</button>
+  <button class="roundbtn" id="btn-menu">☰</button>
+  <div id="stat"></div>
+</div>
+
+<!-- ══════════ エディタ ══════════ -->
+<div id="editor">
+  <div class="ed-bar">
+    <button id="ed-close">閉じる</button>
+    <h1 id="ed-title">問題の編集</h1>
+    <button id="ed-add" class="primary">＋ 追加</button>
+  </div>
+  <div id="ed-list"></div>
+</div>
+
+<!-- ══════════ ダイアログ ══════════ -->
+<div id="dlg-layer"><div id="dlg">
+  <h2 id="dlg-title"></h2>
+  <p id="dlg-msg"></p>
+  <div class="opts" id="dlg-opts"></div>
+</div></div>
+
+<!-- ══════════ 入力フォーム ══════════ -->
+<div id="form-layer"><div id="form-box">
+  <div class="ed-bar">
+    <button id="form-cancel">キャンセル</button>
+    <h1 id="form-title"></h1>
+    <button id="form-save" class="primary">保存</button>
+  </div>
+  <div id="form-body"></div>
+</div></div>
+
+<!-- 初期データ (Pythonista 版 list.json と同一) -->
+<script type="application/json" id="seed-deck">
+[
+  [1, "DRAM, MOSFET, IGBT, GPU, LED, SRAM を個別半導体デバイスと集積回路 (IC) に分類せよ。",
+      "(1)DRAM: IC\n(2)MOSFET: 個別半導体デバイス\n(3)IGBT: 個別半導体デバイス\n(4)GPU: IC\n(5)LED: 個別半導体デバイス\n(6)SRAM: IC"],
+      
+  [3, "pn接合の(1)障壁により整流作用を発現することから、(2)を(3)に変換する回路に用いられる。(4)では一方の極性だけを通し、(5)では正負両方の極性を同方向の(3)に変換する。",
+      "(1)電位\n(2)交流\n(3)直流\n(4)半波整流\n(5)全波整流"],
+
+  [4, "導体-n型半導体接合の(1)障壁により整流作用を発現し、その障壁の高さは導体の(2)と半導体の(3)の差によって決まる。整流ダイオードと比較して(4)降下は小さく、(5)時間も極めて短いため高速スイッチング用途に適しているが、(6)が大きく(7)が低いという欠点がある。",
+      "(1)ショットキー\n(2)仕事関数\n(3)電子親和力\n(4)順方向電圧\n(5)逆回復\n(6)漏れ電流\n(7)逆耐圧"],
+
+  [5, "逆方向に一定以上の電圧((1)電圧)がかかるとpn接合の(2)が薄くなるため、(3)により急激に電流が流れる。この(4)現象を利用することで、LED回路の定電圧電源などに用いられる。",
+      "(1)ツェナー\n(2)空乏層\n(3)トンネル効果\n(4)降伏"],
+
+  [8, "トランジスタのスイッチング機能: 0.7V以上の(1)-(2)間電圧をかけると電子が(3)障壁を越えて(4)が流れスイッチON((5)領域)となる。0.7V以下では電子が(3)障壁を越えられず(4)が流れないためスイッチOFF((6)領域)となる。",
+      "(1)ベース\n(2)エミッタ\n(3)電位\n(4)コレクタ電流\n(5)飽和\n(6)遮断"],
+
+  [11,"BJTの活性領域: (1)機能に寄与する領域で、(2)電流は(3)電流に(4)を掛けた値に比例する。(2)-(5)間電圧がある程度以上であれば(2)電流はほぼ一定となり主に(3)電流の大きさに依存する。",
+      "(1)増幅\n(2)コレクタ\n(3)ベース\n(4)直流電流増幅率\n(5)エミッタ"],
+
+  [14,"NチャネルMOSFET: (1)-(2)間に電圧を加えると(3)型半導体中の(4)がボディ側に引き寄せられ(1)付近が相対的に(5)電位となる。その結果チャネルが形成され(6)-(2)間が導通する。加える電圧を大きくするとチャネルが厚くなりより多くの電流が流れるためMOSFETは(7)としても機能する。",
+      "(1)ゲート\n(2)ソース\n(3)p\n(4)ホール\n(5)負\n(6)ドレイン\n(7)スイッチ"],
+
+  [16,"パワーMOSFET: 高(1)かつ高速(2)特性を持つことからカーエレクトロニクスなどの電力制御に広く利用されている。主に垂直方向にゲートを埋め込む(3)構造が採用され、セルサイズの低減が図られている。材料にはワイドバンドギャップの(4)や(5)が用いられる。",
+      "(1)耐圧\n(2)スイッチング\n(3)トレンチ\n(4)SiC\n(5)GaN"],
+
+  [17,"IGBTの構造: MOSFETと同様の(1)とBJTと同様の(2)、コレクタの3端子を持つ。表面から順に(3)層、(4)層、(5)層、(6)層で構成されており、添え字の+と−はそれぞれ(7)の高低を示している。",
+      "(1)ゲート\n(2)エミッタ\n(3)N+\n(4)Pエミッタ\n(5)N-ドリフト\n(6)P+コレクタ\n(7)ドーピング濃度"],
+
+  [18,"NチャネルIGBTの等価回路: (1)型MOSFETと(2)型BJTを接続した回路で表すことができる。MOSFETがONになるとBJTの(3)電流が流れ結果として(4)電流が増幅される。",
+      "(1)Nチャネル\n(2)PNP\n(3)ベース\n(4)コレクタ"],
+
+  [19,"IGBTの動作: ゲート電圧を加えるとチャネルが形成され電子が(1)層から(2)層を通って(3)層に到達する。同時に(4)層からはホールが注入されることから(3)層内で電子とホールの密度が増加し(5)変調が生じてIGBTでは低(6)が実現する。",
+      "(1)N+\n(2)Pエミッタ\n(3)N-ドリフト\n(4)P+コレクタ\n(5)伝導度\n(6)オン抵抗"],
+
+  [21,"サイリスタの構造: (1)からカソードに向けてPNPNの4層構造を持ち、Pゲート品は(2)層目の(3)層に、Nゲート品は(4)層目の(5)層にゲートが存在する。",
+      "(1)アノード\n(2)3\n(3)P\n(4)2\n(5)N"],
+
+  [22,"サイリスタ(Pゲート品)の動作原理: 等価回路は交差接続した(1)型BJT((2)側)と(3)型BJT(カソード側)で構成される。ゲート信号を加えると(3)型が動作することで(1)型もONとなる。これにより相互に電流を供給し合い、ゲート信号がゼロでも(2)からカソードに電流が流れ続ける。",
+      "(1)PNP, (2)アノード, (3)NPN"],
+
+  [24,"DRAMセル: (1)1個と(2)1個で構成され、両者は直列に接続されている。(1)のゲートは行方向の(3)線に、ソースは列方向の(4)線に接続されているため、任意の行・列の組み合わせにより個々のセルへの(5)アクセスが可能となる。",
+      "(1)MOSFET\n(2)キャパシタ\n(3)ワード\n(4)ビット\n(5)ランダム"],
+
+  [25,"DRAMの書き込み/読み出し: 書き込みでは(1)線を高電位にしてMOSFETをONにし、(2)線の電位により(3)を充電すれば『1』、放電すれば『0』が書き込まれる。読み出しでは(1)線を高電位にしてMOSFETをONにすると、『1』の場合は(3)から放電電流が流れ(2)線の電位が(4)し、『0』の場合は放電電流が流れないため(2)線の電位はわずかに(5)する。",
+      "(1)ワード\n(2)ビット\n(3)キャパシタ\n(4)上昇\n(5)降下"],
+
+  [26,"DRAMのリフレッシュ: (1)電流によりキャパシタが(2)するため時間が経過するとデータが失われる。この(3)性のために数ミリ秒〜数十ミリ秒ごとに全ビットのデータを読み出して再書き込みすることでキャパシタの(4)を回復させてデータを保持する。",
+      "(1)リーク\n(2)自然放電\n(3)揮発\n(4)電荷"],
+
+  [27,"DRAMインターフェース: (1)は(2)の立ち上がりエッジのみに(3)して動作し、1(2)あたり1データを転送する。(4)は立ち上がりと立ち下がりのエッジに(3)し、1(2)あたり2データを転送するため、転送速度が(1)の2倍になる。",
+      "(1)SDR\n(2)クロック\n(3)同期\n(4)DDR"],
+
+  [28,"SRAMセル: 2つの(1)が互いに出力と入力を接続する(2)を形成し、2つの安定状態を持つ(3)として動作する。各インバーターの出力ノードはPMOSとNMOSの(4)端子を共有している。(5)線の電位によって2つのアクセス用MOSFETをオン・オフすることで(6)線とセルの接続を制御する。",
+      "(1)CMOSインバータ\n(2)相互帰還構造\n(3)ラッチ回路\n(4)ドレイン\n(5)ワード\n(6)ビット"],
+
+  [29,"SRAMの書き込み/読み取り: (1)線を高電位にするとアクセス用MOSFETがONになり、(2)と(3)線が接続される。2本の(3)線に書き込みたい論理値に応じた電位を印加することで(4)の安定状態が切り替わりデータが書き込まれる。同様に(2)と(3)線が接続されると保持された論理値に応じて(3)線の電位がわずかに変化し、その差を(5)で増幅してデータを読み取る。",
+      "(1)ワード\n(2)メモリセル\n(3)ビット\n(4)CMOSインバーター\n(5)センスアンプ"],
+
+  [30,"フラッシュメモリセル: 基板上に(1)→(2)→(3)→(4)の順に形成されており、(2)を(1)と(3)で挟むことで電子を閉じ込め情報を保持している。",
+      "(1)トンネル酸化膜\n(2)浮遊ゲート\n(3)絶縁膜\n(4)制御ゲート"],
+
+  [31,"フラッシュメモリ書き込み: (1)に4〜6V、(2)に約10Vを印加してチャネルを形成すると、(3)から(1)へ電子が加速される。(4)と呼ばれるこれらの電子の一部が(5)を通って(6)に蓄積され、論理値0として記録される。",
+      "(1)ドレイン\n(2)ゲート\n(3)ソース\n(4)ホットエレクトロン\n(5)トンネル酸化膜\n(6)浮遊ゲート"],
+
+  [32,"フラッシュメモリ読み出し: ゲートとドレインに正電圧を印加すると、論理値0の場合浮遊ゲートに蓄積されている電子の(1)により(2)が形成されず、(3)から(4)にはごく僅かな電流しか流れない。一方論理値1の場合電子が蓄積されていないため(2)が形成され、(3)から(4)に電流が流れる。",
+      "(1)遮蔽効果\n(2)チャネル\n(3)ドレイン\n(4)ソース"],
+
+  [33,"フラッシュメモリのタイプ: (1)型はセルを(2)接続しワード線・ビット線・(3)線を共有することで高(4)・低(5)・大(6)を実現しているが(7)は不可である。一方(8)型はセルを(9)接続し各線が独立しているため(7)は可能であるが低(4)・高(5)・小(6)となる。",
+      "(1)NAND\n(2)直列\n(3)ソース\n(4)集積\n(5)コスト\n(6)容量\n(7)ランダムアクセス\n(8)NOR\n(9)並列"]
+]
+</script>
+
+<script>
+'use strict';
+
+/* ══════════════════════════════════════════════════════════
+   ストレージ (localStorage が使えない環境ではメモリに退避)
+   ══════════════════════════════════════════════════════════ */
+const DECKS_KEY = 'flashcards.decks.v2';
+const LAST_KEY  = 'flashcards.lastDeck';
+
+const store = (() => {
+  let ok = true;
+  try {
+    localStorage.setItem('__t', '1');
+    localStorage.removeItem('__t');
+  } catch (e) { ok = false; }
+  const mem = {};
+  return {
+    persistent: ok,
+    get(k)    { try { return ok ? localStorage.getItem(k) : (mem[k] ?? null); } catch (e) { return mem[k] ?? null; } },
+    set(k, v) { try { ok ? localStorage.setItem(k, v) : (mem[k] = v); } catch (e) { mem[k] = v; } },
+  };
+})();
+
+/* ══════════════════════════════════════════════════════════
+   デッキ (= list*.json 1 個ぶん)
+   ══════════════════════════════════════════════════════════ */
+let decks = [];        // [{id, name, cards:[[no, q, a], ...]}]
+let deckId = null;     // 現在のデッキ id
+
+const uid = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+function normalizeCards(raw) {
+  if (!Array.isArray(raw)) throw new Error('配列ではありません');
+  return raw.map((row, i) => {
+    if (!Array.isArray(row) || row.length < 3) throw new Error(`${i + 1} 番目の要素の形式が違います`);
+    return [row[0], String(row[1] ?? ''), String(row[2] ?? '')];
+  });
+}
+
+function loadDecks() {
+  const raw = store.get(DECKS_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) {
+        decks = parsed.map(d => ({ id: d.id || uid(), name: d.name || '無題', cards: normalizeCards(d.cards) }));
+        return;
+      }
+    } catch (e) { /* 壊れていたら初期データへ */ }
+  }
+  decks = [{
+    id: uid(),
+    name: '半導体',
+    cards: normalizeCards(JSON.parse(document.getElementById('seed-deck').textContent)),
+  }];
+  saveDecks();
+}
+
+function saveDecks() {
+  store.set(DECKS_KEY, JSON.stringify(decks));
+}
+
+const currentDeck = () => decks.find(d => d.id === deckId) || decks[0];
+
+/* ══════════════════════════════════════════════════════════
+   ダイアログ (console.alert 相当) — 選んだ番号を 1 始まりで返す
+   ══════════════════════════════════════════════════════════ */
+const dlgLayer = document.getElementById('dlg-layer');
+const dlgTitle = document.getElementById('dlg-title');
+const dlgMsg   = document.getElementById('dlg-msg');
+const dlgOpts  = document.getElementById('dlg-opts');
+
+function alertDialog(title, msg, ...options) {
+  return new Promise(resolve => {
+    dlgTitle.textContent = title;
+    dlgMsg.textContent = msg || '';
+    dlgOpts.innerHTML = '';
+    options.forEach((opt, i) => {
+      const label = typeof opt === 'string' ? opt : opt.label;
+      const style = typeof opt === 'string' ? '' : (opt.style || '');
+      const b = document.createElement('button');
+      b.textContent = label;
+      if (style) b.className = style;
+      b.addEventListener('click', () => { dlgLayer.classList.remove('on'); resolve(i + 1); });
+      dlgOpts.appendChild(b);
+    });
+    dlgLayer.classList.add('on');
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   入力フォーム (問題の追加・編集 / デッキ名など)
+   ══════════════════════════════════════════════════════════ */
+const formLayer  = document.getElementById('form-layer');
+const formTitle  = document.getElementById('form-title');
+const formBody   = document.getElementById('form-body');
+const formSave   = document.getElementById('form-save');
+const formCancel = document.getElementById('form-cancel');
+let formResolve = null;
+
+/* fields: [{key, label, value, type:'text'|'textarea', hint, rows}] → 値の object か null */
+function openForm(title, fields) {
+  return new Promise(resolve => {
+    formResolve = resolve;
+    formTitle.textContent = title;
+    formBody.innerHTML = '';
+    fields.forEach(f => {
+      const lab = document.createElement('label');
+      lab.textContent = f.label;
+      lab.htmlFor = 'f_' + f.key;
+      const el = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+      el.id = 'f_' + f.key;
+      el.dataset.key = f.key;
+      if (f.type !== 'textarea') el.type = 'text';
+      else el.rows = f.rows || 4;
+      el.value = f.value ?? '';
+      formBody.appendChild(lab);
+      formBody.appendChild(el);
+      if (f.hint) {
+        const h = document.createElement('div');
+        h.className = 'hint';
+        h.textContent = f.hint;
+        formBody.appendChild(h);
+      }
+    });
+    formLayer.classList.add('on');
+    const first = formBody.querySelector('input, textarea');
+    if (first) setTimeout(() => first.focus(), 60);
+  });
+}
+
+function closeForm(result) {
+  formLayer.classList.remove('on');
+  const r = formResolve;
+  formResolve = null;
+  if (r) r(result);
+}
+
+formCancel.addEventListener('click', () => closeForm(null));
+formSave.addEventListener('click', () => {
+  const out = {};
+  formBody.querySelectorAll('input, textarea').forEach(el => { out[el.dataset.key] = el.value; });
+  closeForm(out);
+});
+
+/* ══════════════════════════════════════════════════════════
+   カード画面
+   ══════════════════════════════════════════════════════════ */
+const elWord = document.getElementById('word');
+const elMean = document.getElementById('mean');
+const elStat = document.getElementById('stat');
+const btnCorrect = document.getElementById('btn-correct');
+const btnWrong   = document.getElementById('btn-wrong');
+const btnBack    = document.getElementById('btn-back');
+const btnMenu    = document.getElementById('btn-menu');
+const btnExit    = document.getElementById('btn-exit');
+
+const state = {
+  allCards: [],
+  cards: [],
+  index: 0,
+  correct: 0,
+  attempts: 0,
+  history: [],      // [[card, ok], ...]
+  wrongCards: [],
+  showMean: false,
+  jpFirst: false,   // 表示方向 (表=問題 / 表=答え)
+};
+
+/* 答えが複数行なら「番号だけ左端揃え・全体は中央寄せ」で描画。
+   フォント測定のため中身は常に .inner で包む */
+function renderFace(el, text, dim) {
+  el.textContent = '';
+  el.classList.toggle('hidden-face', dim);
+  const inner = document.createElement('div');
+  inner.className = !dim && text.includes('\n') ? 'inner block' : 'inner';
+  inner.textContent = text;
+  el.appendChild(inner);
+}
+
+/* Pythonista の _fit_font 相当 — 枠に収まる最大サイズを二分探索。
+   中身 (.inner) は高さ制限を受けないので実寸がそのまま測れる */
+function fitFont(el, maxPt, minPt) {
+  const inner = el.firstElementChild;
+
+  const search = () => {
+    let lo = minPt, hi = maxPt, best = null;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      el.style.fontSize = mid + 'px';
+      if (inner.offsetHeight <= el.clientHeight && inner.scrollWidth <= el.clientWidth + 1) {
+        best = mid; lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best;
+  };
+
+  let size = search();
+  if (size === null && inner.classList.contains('block')) {
+    /* 番号リストが横に入りきらない場合だけ折り返しを許可して測り直す */
+    inner.classList.add('wrap');
+    size = search();
+  }
+  el.style.fontSize = (size === null ? minPt : size) + 'px';
+}
+
+function presentCard() {
+  if (!state.cards.length) return;
+  const [no, q, a] = state.cards[state.index];
+  const front = state.jpFirst ? a : `${no}. ${q}`;
+  const back  = state.jpFirst ? `${no}. ${q}` : a;
+
+  renderFace(elWord, front, false);
+  renderFace(elMean, state.showMean ? back : '(タップで裏面表示)', !state.showMean);
+  elStat.textContent =
+    `${state.index + 1}/${state.cards.length}   正解 ${state.correct}/${state.attempts}`;
+
+  btnBack.disabled = state.history.length === 0;
+
+  fitFont(elWord, 40, 14);
+  fitFont(elMean, 30, 12);
+}
+
+function markCorrect() {
+  state.history.push([state.cards[state.index], true]);
+  state.correct++;
+  state.attempts++;
+  nextCard();
+}
+
+function markWrong() {
+  const card = state.cards[state.index];
+  state.history.push([card, false]);
+  state.wrongCards.push(card);
+  state.attempts++;
+  nextCard();
+}
+
+function goBack() {
+  if (!state.history.length) return;
+  const [card, ok] = state.history.pop();
+  state.index = Math.max(0, state.index - 1);
+  if (ok) state.correct--;
+  else if (state.wrongCards[state.wrongCards.length - 1] === card) state.wrongCards.pop();
+  state.attempts--;
+  state.showMean = false;
+  presentCard();
+}
+
+function nextCard() {
+  state.showMean = false;
+  state.index++;
+  if (state.index >= state.cards.length) finishDialog();
+  else presentCard();
+}
+
+const shuffled = arr => {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+function resetWith(list, shuffle) {
+  /* 空のリストはカード画面を出しようがないのでエディタへ回す */
+  if (!list.length) { openEditor(); return; }
+  state.cards = shuffle ? shuffled(list) : list.slice();
+  state.index = state.correct = state.attempts = 0;
+  state.history = [];
+  state.wrongCards = [];
+  state.showMean = false;
+  presentCard();
+}
+
+async function orderDialog(newCards) {
+  let list = newCards;
+  if (!list.length) {
+    await alertDialog('不正解はありません', '', 'OK');
+    list = state.allCards;
+  }
+  const ch = await alertDialog('順序選択', '', '順番', 'ランダム');
+  resetWith(list, ch === 2);
+}
+
+async function finishDialog() {
+  const ch = await alertDialog('完了', `正解 ${state.correct}/${state.attempts}`,
+                               '全部やり直す', '不正解だけ', 'メニューへ');
+  if (ch === 1) await orderDialog(state.allCards);
+  else if (ch === 2) await orderDialog(state.wrongCards.length ? state.wrongCards : state.allCards);
+  else await menuDialog();
+}
+
+/* ══════════════════════════════════════════════════════════
+   メニュー
+   ══════════════════════════════════════════════════════════ */
+async function menuDialog() {
+  const ch = await alertDialog('メニュー', currentDeck().name,
+    '順番で最初から',
+    'シャッフルで最初から',
+    '表示方向を切替',
+    'リストを選ぶ',
+    '問題を編集',
+    'リストの管理',
+    'キャンセル');
+
+  if (ch === 1) resetWith(state.allCards, false);
+  else if (ch === 2) resetWith(state.allCards, true);
+  else if (ch === 3) { state.jpFirst = !state.jpFirst; presentCard(); }
+  else if (ch === 4) await pickDeckDialog();
+  else if (ch === 5) openEditor();
+  else if (ch === 6) await deckAdminDialog();
+}
+
+async function pickDeckDialog() {
+  if (decks.length === 1) {
+    await alertDialog('リスト選択', 'リストは 1 個だけです', 'OK');
+    return menuDialog();
+  }
+  const opts = decks.map(d => `${d.name} (${d.cards.length})`);
+  opts.push('キャンセル');
+  const ch = await alertDialog('リスト選択', '', ...opts);
+  if (ch > decks.length) return;
+  selectDeck(decks[ch - 1].id);
+  if (!state.allCards.length) {
+    await alertDialog('問題がありません', 'このリストは空です。問題を追加してください。', 'OK');
+    openEditor();
+    return;
+  }
+  const ord = await alertDialog('カード順序', 'どの順序で始めますか?', '順番どおり', 'ランダム');
+  resetWith(state.allCards, ord === 2);
+}
+
+function selectDeck(id) {
+  deckId = id;
+  store.set(LAST_KEY, id);
+  state.allCards = currentDeck().cards;
+  state.cards = state.allCards.slice();
+  state.index = state.correct = state.attempts = 0;
+  state.history = [];
+  state.wrongCards = [];
+  state.showMean = false;
+}
+
+/* ── リストの管理: 新規 / 名前変更 / 複製 / 削除 / 読込 / 書出 ── */
+async function deckAdminDialog() {
+  const ch = await alertDialog('リストの管理', currentDeck().name,
+    '新しいリストを作る',
+    'このリストの名前を変える',
+    'このリストを複製',
+    'JSON を読み込む',
+    'JSON を書き出す',
+    { label: 'このリストを削除', style: 'danger' },
+    'キャンセル');
+
+  if (ch === 1) {
+    const r = await openForm('新しいリスト', [{ key: 'name', label: 'リスト名', value: '' }]);
+    if (!r) return deckAdminDialog();
+    const name = (r.name || '').trim() || '無題';
+    const d = { id: uid(), name, cards: [] };
+    decks.push(d);
+    saveDecks();
+    selectDeck(d.id);
+    openEditor();
+  } else if (ch === 2) {
+    const d = currentDeck();
+    const r = await openForm('リスト名の変更', [{ key: 'name', label: 'リスト名', value: d.name }]);
+    if (!r) return;
+    d.name = (r.name || '').trim() || d.name;
+    saveDecks();
+  } else if (ch === 3) {
+    const d = currentDeck();
+    const copy = { id: uid(), name: d.name + ' のコピー', cards: d.cards.map(c => c.slice()) };
+    decks.push(copy);
+    saveDecks();
+    await alertDialog('複製しました', copy.name, 'OK');
+  } else if (ch === 4) {
+    importJson();
+  } else if (ch === 5) {
+    exportJson();
+  } else if (ch === 6) {
+    if (decks.length === 1) {
+      await alertDialog('削除できません', '最後の 1 個は削除できません', 'OK');
+      return;
+    }
+    const d = currentDeck();
+    const yes = await alertDialog('削除しますか?', `${d.name} (${d.cards.length}問)`,
+                                  { label: '削除する', style: 'danger' }, 'やめる');
+    if (yes !== 1) return;
+    decks = decks.filter(x => x.id !== d.id);
+    saveDecks();
+    selectDeck(decks[0].id);
+    resetWith(state.allCards, false);
+  }
+}
+
+/* ── JSON 入出力 (Pythonista 版の list*.json と互換) ── */
+function importJson() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const cards = normalizeCards(JSON.parse(String(reader.result)));
+        const name = file.name.replace(/\.json$/i, '');
+        const d = { id: uid(), name, cards };
+        decks.push(d);
+        saveDecks();
+        const ch = await alertDialog('読み込みました', `${name} (${cards.length}問)`,
+                                     'このリストを始める', 'あとで');
+        if (ch === 1) {
+          selectDeck(d.id);
+          resetWith(state.allCards, false);
+        }
+      } catch (e) {
+        await alertDialog('読み込めません', String(e.message || e), 'OK');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+  input.click();
+}
+
+/* ブラウザによっては日本語のファイル名が捨てられて拡張子まで失われるので、
+   Pythonista 版と同じ list*.json 形式の ASCII 名にそろえる */
+function exportFileName(deck) {
+  const idx = decks.indexOf(deck) + 1;
+  const ascii = deck.name.replace(/[^\w.\- ]+/g, '').trim().replace(/\s+/g, '_');
+  return ascii ? `list${idx}_${ascii}.json` : `list${idx}.json`;
+}
+
+async function exportJson() {
+  const d = currentDeck();
+  const name = exportFileName(d);
+  const blob = new Blob([JSON.stringify(d.cards, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  await alertDialog('書き出しました', `${name}\n(${d.cards.length}問)`, 'OK');
+}
+
+/* ══════════════════════════════════════════════════════════
+   エディタ
+   ══════════════════════════════════════════════════════════ */
+const editor  = document.getElementById('editor');
+const edList  = document.getElementById('ed-list');
+const edTitle = document.getElementById('ed-title');
+
+function openEditor() {
+  editor.classList.add('on');
+  renderEditor();
+}
+
+function closeEditor() {
+  editor.classList.remove('on');
+  saveDecks();
+  const d = currentDeck();
+  state.allCards = d.cards;
+  if (!d.cards.length) {
+    alertDialog('問題がありません', 'このリストは空です。問題を追加してください。', 'OK')
+      .then(() => openEditor());
+    return;
+  }
+  /* 編集後は現在のリストで最初から */
+  resetWith(state.allCards, false);
+}
+
+function renderEditor() {
+  const d = currentDeck();
+  edTitle.textContent = `${d.name} (${d.cards.length}問)`;
+  edList.innerHTML = '';
+
+  if (!d.cards.length) {
+    const empty = document.createElement('div');
+    empty.className = 'ed-empty';
+    empty.textContent = 'まだ問題がありません。\n右上の「＋ 追加」から作れます。';
+    empty.style.whiteSpace = 'pre-wrap';
+    edList.appendChild(empty);
+    return;
+  }
+
+  d.cards.forEach((card, i) => {
+    const box = document.createElement('div');
+    box.className = 'ed-card';
+
+    const no = document.createElement('div');
+    no.className = 'no';
+    no.textContent = `No. ${card[0]}`;
+
+    const q = document.createElement('div');
+    q.className = 'q';
+    q.textContent = card[1];
+
+    const a = document.createElement('div');
+    a.className = 'a';
+    a.textContent = card[2];
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.appendChild(mkEdBtn('編集', () => editCard(i)));
+    row.appendChild(mkEdBtn('↑', () => moveCard(i, -1)));
+    row.appendChild(mkEdBtn('↓', () => moveCard(i, +1)));
+    const del = mkEdBtn('削除', () => deleteCard(i));
+    del.className = 'del';
+    row.appendChild(del);
+
+    box.append(no, q, a, row);
+    edList.appendChild(box);
+  });
+}
+
+function mkEdBtn(label, fn) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+
+const CARD_FIELDS = (no, q, a) => ([
+  { key: 'no', label: '番号', value: no,
+    hint: '教科書の問題番号など。表面に「番号. 問題文」として出ます。' },
+  { key: 'q', label: '問題文', value: q, type: 'textarea', rows: 6 },
+  { key: 'a', label: '答え', value: a, type: 'textarea', rows: 7,
+    hint: '改行で区切ると、(1)(2)… の行が左端揃えで縦に並びます。' },
+]);
+
+async function editCard(i) {
+  const d = currentDeck();
+  const c = d.cards[i];
+  const r = await openForm('問題の編集', CARD_FIELDS(c[0], c[1], c[2]));
+  if (!r) return;
+  d.cards[i] = [parseNo(r.no), r.q.trim(), r.a.trim()];
+  saveDecks();
+  renderEditor();
+}
+
+async function addCard() {
+  const d = currentDeck();
+  const nextNo = d.cards.length
+    ? (Number(d.cards[d.cards.length - 1][0]) || d.cards.length) + 1
+    : 1;
+  const r = await openForm('問題の追加', CARD_FIELDS(nextNo, '', ''));
+  if (!r) return;
+  if (!r.q.trim() && !r.a.trim()) return;
+  d.cards.push([parseNo(r.no), r.q.trim(), r.a.trim()]);
+  saveDecks();
+  renderEditor();
+  edList.scrollTop = edList.scrollHeight;
+}
+
+/* 番号は数字なら数値、それ以外は文字列のまま保持 */
+function parseNo(v) {
+  const s = String(v ?? '').trim();
+  return /^-?\d+$/.test(s) ? Number(s) : (s || 0);
+}
+
+async function deleteCard(i) {
+  const d = currentDeck();
+  const ch = await alertDialog('削除しますか?', `No. ${d.cards[i][0]}`,
+                               { label: '削除する', style: 'danger' }, 'やめる');
+  if (ch !== 1) return;
+  d.cards.splice(i, 1);
+  saveDecks();
+  renderEditor();
+}
+
+function moveCard(i, dir) {
+  const d = currentDeck();
+  const j = i + dir;
+  if (j < 0 || j >= d.cards.length) return;
+  [d.cards[i], d.cards[j]] = [d.cards[j], d.cards[i]];
+  saveDecks();
+  renderEditor();
+}
+
+document.getElementById('ed-add').addEventListener('click', addCard);
+document.getElementById('ed-close').addEventListener('click', closeEditor);
+
+/* ══════════════════════════════════════════════════════════
+   イベント
+   ══════════════════════════════════════════════════════════ */
+btnCorrect.addEventListener('click', markCorrect);
+btnWrong.addEventListener('click', markWrong);
+btnBack.addEventListener('click', goBack);
+btnMenu.addEventListener('click', menuDialog);
+btnExit.addEventListener('click', async () => {
+  const ch = await alertDialog('終了しますか?', '成績はリセットされます', '最初に戻る', 'キャンセル');
+  if (ch === 1) await startDialog();
+});
+
+/* 画面タップで裏表を切り替え (ボタン上は無視) */
+document.getElementById('card-view').addEventListener('click', ev => {
+  if (ev.target.closest('button')) return;
+  state.showMean = !state.showMean;
+  presentCard();
+});
+
+/* PC 用ショートカット */
+document.addEventListener('keydown', ev => {
+  if (dlgLayer.classList.contains('on') || formLayer.classList.contains('on')
+      || editor.classList.contains('on')) return;
+  if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); state.showMean = !state.showMean; presentCard(); }
+  else if (ev.key === 'ArrowRight' || ev.key === 'o') markCorrect();
+  else if (ev.key === 'ArrowDown' || ev.key === 'x') markWrong();
+  else if (ev.key === 'ArrowLeft') goBack();
+});
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (state.cards.length) presentCard();
+  }, 80);
+});
+
+/* ══════════════════════════════════════════════════════════
+   起動
+   ══════════════════════════════════════════════════════════ */
+async function startDialog() {
+  /* list*.json が複数あるときの選択に相当 */
+  if (decks.length > 1) {
+    const opts = decks.map(d => `${d.name} (${d.cards.length})`);
+    const ch = await alertDialog('リスト選択', '', ...opts);
+    selectDeck(decks[ch - 1].id);
+  } else {
+    selectDeck(decks[0].id);
+  }
+
+  if (!currentDeck().cards.length) {
+    await alertDialog('問題がありません', 'このリストは空です。問題を追加してください。', 'OK');
+    openEditor();
+    return;
+  }
+
+  const ch = await alertDialog('カード順序', 'どの順序で始めますか?', '順番どおり', 'ランダム');
+  resetWith(state.allCards, ch === 2);
+}
+
+loadDecks();
+const last = store.get(LAST_KEY);
+if (last && decks.some(d => d.id === last)) deckId = last;
+startDialog();
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
