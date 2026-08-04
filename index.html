@@ -369,7 +369,7 @@
 'use strict';
 
 /* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
-const APP_VERSION = '2026-08-05b';
+const APP_VERSION = '2026-08-05c';
 
 /* ══════════════════════════════════════════════════════════
    版ずれの自己修復
@@ -462,6 +462,7 @@ let activeFile = null;  // 'semiconductor.json' など
 let activeName = '';
 let cards      = [];    // 現在のリストの中身
 let isEdited   = false; // ファイルから書き換えられているか
+let cardSource = '-';   // カードをどこから読んだか (診断用)
 
 const isLocal = f => String(f).startsWith('local:');
 
@@ -579,12 +580,13 @@ async function loadCards(entry) {
     try {
       cards = normalizeCards(JSON.parse(edit));
       isEdited = !entry.local;
+      cardSource = entry.local ? '端末' : '編集';
       return;
     } catch (e) { store.del(editKey(entry.file)); }
   }
   isEdited = false;
 
-  if (entry.local) { cards = []; return; }
+  if (entry.local) { cards = []; cardSource = '端末'; return; }
 
   try {
     const res = await fetch('lists/' + entry.file, { cache: 'no-cache' });
@@ -592,15 +594,17 @@ async function loadCards(entry) {
       const text = await res.text();
       cards = normalizeCards(JSON.parse(text));
       store.set(cacheKey(entry.file), text);
+      cardSource = 'ファイル';
       return;
     }
   } catch (e) { /* 圏外・file:// */ }
 
   const cached = store.get(cacheKey(entry.file));
-  if (cached) { cards = normalizeCards(JSON.parse(cached)); return; }
+  if (cached) { cards = normalizeCards(JSON.parse(cached)); cardSource = 'キャッシュ'; return; }
 
   /* 組み込みの初期データ (最初の1ファイルぶんだけ持っている) */
   cards = entry.file === FALLBACK_ENTRIES[0].file ? seedCards() : [];
+  cardSource = '組み込み';
 }
 
 /* 圏外でも全リストを開けるよう、裏で残りのファイルも取っておく */
@@ -816,8 +820,10 @@ function presentCard() {
     setBtnMode(state.checked ? 'checked' : 'input');
   }
 
+  const MODE_JA = { flip: 'めくる', fill: '穴埋め', write: '記述', self: '自己' };
   elStat.textContent =
-    `${state.index + 1}/${state.cards.length}   正解 ${state.correct}/${state.attempts}`;
+    `${state.index + 1}/${state.cards.length}   正解 ${state.correct}/${state.attempts}`
+    + `   [${card[3] || '形式なし'}→${MODE_JA[state.mode]}${state.forceFlip ? '*' : ''}]`;
   btnBack.disabled = state.history.length === 0;
 }
 
@@ -1018,7 +1024,7 @@ async function menuDialog() {
 
 const menuSubtitle = () =>
   `${activeName} (${cards.length}問)` + (isEdited ? '  ※編集あり' : '')
-  + `\nver ${APP_VERSION}`;
+  + `\nver ${APP_VERSION} / 出典 ${cardSource}`;
 
 /* ── ファイル選択 (Pythonista 版の list*.json 選択に相当) ── */
 async function pickFileDialog(startup) {
@@ -1041,6 +1047,7 @@ async function openEntry(entry) {
   await loadCards(entry);
   state.allCards = cards;
   state.jpFirst = false;
+  state.forceFlip = false;   // 前のリストでの «めくるだけ» を持ち越さない
 
   if (!cards.length) {
     await alertDialog('問題がありません', 'このリストは空です。問題を追加してください。', 'OK');
@@ -1059,7 +1066,7 @@ async function fileAdminDialog() {
   acts.push(['import', '端末の JSON を読み込む']);
   acts.push(['new',    '新しいリストを作る (端末内)']);
   acts.push(['update', 'アプリの更新を確認']);
-  if (isEdited) acts.push(['revert', { label: '編集を捨ててファイルに戻す', style: 'danger' }]);
+  if (!local) acts.push(['revert', { label: 'ファイルを再取得する', style: 'danger' }]);
   if (local)    acts.push(['delete', { label: 'このリストを削除', style: 'danger' }]);
   acts.push(['cancel', 'キャンセル']);
 
@@ -1078,10 +1085,13 @@ async function fileAdminDialog() {
     const name = (r.name || '').trim() || '無題';
     addLocalEntry(name, []);
   } else if (act === 'revert') {
-    const yes = await alertDialog('編集を捨てますか?', `${activeName} を lists/${activeFile} の内容に戻します`,
-                                  { label: '戻す', style: 'danger' }, 'やめる');
+    const yes = await alertDialog('再取得しますか?',
+                                  `端末に残っている ${activeName} のデータを捨てて\n` +
+                                  `lists/${activeFile} を読み直します`,
+                                  { label: '再取得', style: 'danger' }, 'やめる');
     if (yes !== 1) return;
     store.del(editKey(activeFile));
+    store.del(cacheKey(activeFile));
     await openEntry({ file: activeFile, name: activeName });
   } else if (act === 'delete') {
     const yes = await alertDialog('削除しますか?', `${activeName} (${cards.length}問)`,
