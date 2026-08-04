@@ -369,7 +369,7 @@
 'use strict';
 
 /* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
-const APP_VERSION = '2026-08-05c';
+const APP_VERSION = '2026-08-05d';
 
 /* ══════════════════════════════════════════════════════════
    版ずれの自己修復
@@ -573,31 +573,57 @@ async function loadEntries() {
   entries = (base && base.length ? base : FALLBACK_ENTRIES).concat(localEntries());
 }
 
-/* 1 ファイル読み込み。編集済みならそれを優先し、なければ実ファイル→キャッシュ */
+/* 形式だけ入っていない古い保存コピーかどうかを判定する。
+   以前は編集画面を開いて閉じるだけでも、取得済みデータ全体を「編集」として
+   localStorage に保存していた。そのコピーが残ると、後から JSON に追加した
+   fill/write/self が永久に読まれないため、内容が同一なら最新版へ戻す。 */
+const hasInteractiveType = list => list.some(c => c[3] === 'fill' || c[3] === 'write' || c[3] === 'self');
+const sameCardContent = (a, b) => a.length === b.length && a.every((c, i) =>
+  String(c[0]) === String(b[i][0]) && c[1] === b[i][1] && c[2] === b[i][2]);
+
+/* 1 ファイル読み込み。実ファイルも確認しつつ本当の編集内容は優先し、
+   取れなければ編集済みデータ→キャッシュの順に落とす */
 async function loadCards(entry) {
   const edit = store.get(editKey(entry.file));
+  let edited = null;
   if (edit) {
     try {
-      cards = normalizeCards(JSON.parse(edit));
-      isEdited = !entry.local;
-      cardSource = entry.local ? '端末' : '編集';
-      return;
+      edited = normalizeCards(JSON.parse(edit));
     } catch (e) { store.del(editKey(entry.file)); }
   }
   isEdited = false;
 
-  if (entry.local) { cards = []; cardSource = '端末'; return; }
+  if (entry.local) { cards = edited || []; cardSource = '端末'; return; }
 
+  let fresh = null;
   try {
     const res = await fetch('lists/' + entry.file, { cache: 'no-cache' });
     if (res.ok) {
       const text = await res.text();
-      cards = normalizeCards(JSON.parse(text));
+      fresh = normalizeCards(JSON.parse(text));
       store.set(cacheKey(entry.file), text);
-      cardSource = 'ファイル';
-      return;
     }
   } catch (e) { /* 圏外・file:// */ }
+
+  if (edited) {
+    const staleTypeCopy = fresh
+      && !hasInteractiveType(edited)
+      && hasInteractiveType(fresh)
+      && sameCardContent(edited, fresh);
+    if (!staleTypeCopy) {
+      cards = edited;
+      isEdited = true;
+      cardSource = '編集';
+      return;
+    }
+    store.del(editKey(entry.file));
+  }
+
+  if (fresh) {
+    cards = fresh;
+    cardSource = 'ファイル';
+    return;
+  }
 
   const cached = store.get(cacheKey(entry.file));
   if (cached) { cards = normalizeCards(JSON.parse(cached)); cardSource = 'キャッシュ'; return; }
@@ -1189,7 +1215,6 @@ function openEditor() {
 
 function closeEditor() {
   editor.classList.remove('on');
-  saveDecks();
   const d = currentDeck();
   state.allCards = d.cards;
   if (!d.cards.length) {
