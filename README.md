@@ -34,7 +34,7 @@ Pythonista 3 用の暗記カードアプリ (`pythonista/test.py`) を、**ブ�
 
 > **更新が反映されないとき**
 >
-> ☰ メニューの2行目に `ver 2026-08-05f` のように版が出ます。
+> ☰ メニューの2行目に `ver 2026-08-05g` のように版が出ます。
 > 通常は起動時に `version.json` と突き合わせ、古ければ自動でキャッシュを捨てて
 > 読み直すので何もしなくて構いません。
 >
@@ -206,6 +206,7 @@ version.json               配信中の版。古い版を掴んだ端末の自�
 lists/index.json           問題リストの一覧
 lists/semiconductor.json   「半導体」23問 (めくるだけ)
 lists/system-safety.json   「システム安全入門」50問 (穴埋め/記述/自己採点)
+lists/system-safety-alpha.json 「システム安全入門α」26問 (重要語句・規格・動作分類)
 pythonista/                移植元の Pythonista 版 (参考用)
 ```
 

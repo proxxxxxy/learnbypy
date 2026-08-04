@@ -1,4 +1,5 @@
 [
   { "file": "semiconductor.json",  "name": "半導体" },
-  { "file": "system-safety.json",  "name": "システム安全入門" }
+  { "file": "system-safety.json",  "name": "システム安全入門" },
+  { "file": "system-safety-alpha.json", "name": "システム安全入門α" }
 ]
