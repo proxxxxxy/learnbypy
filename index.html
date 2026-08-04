@@ -368,6 +368,9 @@
 <script>
 'use strict';
 
+/* この文字列はメニューに出る。iPhone 側が古い版を掴んでいないかの確認用 */
+const APP_VERSION = '2026-08-04b';
+
 /* ══════════════════════════════════════════════════════════
    ストレージ (localStorage が使えない環境ではメモリに退避)
    ══════════════════════════════════════════════════════════ */
@@ -952,7 +955,8 @@ async function menuDialog() {
 }
 
 const menuSubtitle = () =>
-  `${activeName} (${cards.length}問)` + (isEdited ? '  ※編集あり' : '');
+  `${activeName} (${cards.length}問)` + (isEdited ? '  ※編集あり' : '')
+  + `\nver ${APP_VERSION}`;
 
 /* ── ファイル選択 (Pythonista 版の list*.json 選択に相当) ── */
 async function pickFileDialog(startup) {
@@ -1312,7 +1316,20 @@ async function startDialog() {
 startDialog();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  /* updateViaCache:'none' で sw.js 自体がキャッシュから読まれるのを防ぎ、
+     起動のたびに更新を確認する。新しい版が来たら次回起動から有効になる */
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then(reg => {
+      reg.update().catch(() => {});
+      if (reg.waiting) reg.waiting.postMessage('skip-waiting');
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (sw) sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed') sw.postMessage('skip-waiting');
+        });
+      });
+    })
+    .catch(() => {});
 }
 </script>
 </body>

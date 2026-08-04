@@ -32,6 +32,10 @@ Pythonista 3 用の暗記カードアプリ (`pythonista/test.py`) を、**ブ�
 ホーム画面から起動するとアドレスバーが消えて全画面になり、
 一度開いたあとは**機内モードでも動きます**。
 
+> **更新が反映されないとき**: ☰ メニューの2行目に `ver 2026-08-04b` のように
+> 版が出ます。push した内容と食い違うときは端末が古い版を掴んでいるので、
+> ホーム画面のアイコンを削除して Safari から開き直し、もう一度追加してください。
+
 ### ファイルを直接開く
 
 `index.html` を iPhone にダウンロードして Files アプリから開いてもOK。
@@ -174,7 +178,7 @@ index.html                 アプリ本体 (これ 1 つで動く)
 manifest.json / sw.js      ホーム画面追加とオフライン動作用
 lists/index.json           問題リストの一覧
 lists/semiconductor.json   「半導体」23問 (めくるだけ)
-lists/system-safety.json   「システム安全入門」21問 (穴埋め/記述/自己採点)
+lists/system-safety.json   「システム安全入門」50問 (穴埋め/記述/自己採点)
 pythonista/                移植元の Pythonista 版 (参考用)
 ```
 
