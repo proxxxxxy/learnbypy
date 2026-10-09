@@ -1,4 +1,7 @@
 [
   { "file": "system-safety.json",  "name": "システム安全入門" },
-  { "file": "system-safety-alpha.json", "name": "システム安全入門α" }
+  { "file": "system-safety-alpha.json", "name": "システム安全入門α" },
+  { "name": "仮免前効果測定", "folder": [
+    { "file": "karimen/karimen-1.json", "name": "仮免前効果測定-1" }
+  ] }
 ]
