@@ -241,7 +241,7 @@ lists/index.json           問題リストの一覧
 lists/semiconductor.json   「半導体」23問 (めくるだけ)
 lists/system-safety.json   「システム安全入門」50問 (穴埋め/記述/自己採点)
 lists/system-safety-alpha.json 「システム安全入門α」26問 (重要語句・規格・動作分類)
-lists/karimen/             「仮免前効果測定」フォルダ。1 回 50 問の○×問題 (標識の図つき)
+lists/karimen/             「仮免前効果測定」フォルダ。1〜5 回 × 50 問の○×問題 (標識の図つき)
 img/signs/ img/signals/    標識・信号機の SVG (Wikimedia Commons より。出典は img/CREDITS.md)
 pythonista/                移植元の Pythonista 版 (参考用)
 ```
