@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg height="220" viewBox="0 0 640 220" width="640" xmlns="http://www.w3.org/2000/svg">
+  <path d="m0 0h640v220h-640z" fill="#ccc"/>
+  <g stroke="#000" stroke-width="2">
+    <circle cx="110" cy="110" fill="#333" r="100"/>
+    <circle cx="320" cy="110" fill="#333" r="100"/>
+    <circle cx="530" cy="110" fill="#df1a21" r="100">
+      <animate attributeName="fill" values="#df1a21;#333" dur="1s" calcMode="discrete" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>
