@@ -7,5 +7,8 @@
     { "file": "karimen/karimen-3.json", "name": "仮免前効果測定-3" },
     { "file": "karimen/karimen-4.json", "name": "仮免前効果測定-4" },
     { "file": "karimen/karimen-5.json", "name": "仮免前効果測定-5" }
+  ] },
+  { "name": "資源と産業", "folder": [
+    { "file": "resources-industry/second-term-midterm.json", "name": "後期中間" }
   ] }
 ]
